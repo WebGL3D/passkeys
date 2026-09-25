@@ -1,5 +1,5 @@
-import { Typography } from '@mui/material';
+import Login from './login';
 
 export default function AppContent() {
-  return <Typography>Hello, world!</Typography>;
+  return <Login />;
 }
