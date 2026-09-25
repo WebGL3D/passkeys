@@ -1,0 +1,14 @@
+# Secrets
+
+.dev.vars
+
+# Build foo
+
+.git/
+.idea/
+.wrangler/
+build/
+dist/
+node_modules/
+target/
+Dockerfile

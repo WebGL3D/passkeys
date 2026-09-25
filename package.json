@@ -1,9 +1,11 @@
 {
   "name": "passkeys-demo",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "start": "wrangler dev",
+    "deploy": "wrangler deploy",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
@@ -15,6 +17,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
+    "@cloudflare/containers": "0.0.30",
     "@eslint/js": "^10.0.1",
     "@rolldown/plugin-babel": "^0.2.3",
     "@types/babel__core": "^7.20.5",
@@ -29,6 +32,7 @@
     "globals": "^17.12.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.69.0",
-    "vite": "^8.3.0"
+    "vite": "^8.3.0",
+    "wrangler": "^4.140.0"
   }
 }
