@@ -1,0 +1,9 @@
+[package]
+name = "passkeys-demo"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+axum = { version = "0.8", default-features = true, features = ['json'] }
+serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["full"] }

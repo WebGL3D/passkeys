@@ -1,0 +1,66 @@
+name: 'passkeys-demo'
+
+on:
+  # Ensure the build runs on pull requests.
+  pull_request:
+
+# Cancel any workflow that's running if we make another commit on the same pull request.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: 'ubuntu-latest'
+
+    env:
+      PASSKEYS_APP_PORT: 3000
+      PASSKEYS_API_PORT: 5000
+
+    steps:
+      - name: '📥 Clone Repository'
+        uses: actions/checkout@v7
+
+      - name: '🌐 Setup Network'
+        run: >-
+          docker network create tix-factory
+        continue-on-error: true
+
+      - name: '🤫 Generate Secrets'
+        run: >-
+          touch .dev.vars
+
+      - name: '🏗️ Build'
+        run: >-
+          docker compose build
+
+      - name: '🐳 Run'
+        run: |
+          docker compose up -d
+          sleep 5
+        env:
+          VAPID__EMAIL_ADDRESS: 'example@example.com'
+
+      - name: '🔌 Ensure Connectivity (api)'
+        run: >-
+          curl -v --fail http://localhost:${{ env.PASSKEYS_API_PORT }}/api/v1/passkeys/metadata
+
+      - name: '🔌 Ensure Connectivity (app)'
+        run: >-
+          curl -v --fail http://localhost:${{ env.PASSKEYS_APP_PORT }}
+
+      - name: '🪵 Logs (api)'
+        if: ${{ always() }}
+        run: >-
+          docker compose logs api
+
+      - name: '🪵 Logs (app)'
+        if: ${{ always() }}
+        run: >-
+          docker compose logs app
+
+      - name: '🛑 Stop Containers'
+        run: >-
+          docker compose rm
+          --stop
+          --force
