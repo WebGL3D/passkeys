@@ -51,6 +51,9 @@
    * https://developers.cloudflare.com/workers/configuration/secrets/
    */
   "vars": { "HELLO": "world" },
+  "previews": {
+    "vars": { "HELLO": "world" },
+  },
   /**
    * Static Assets
    * https://developers.cloudflare.com/workers/static-assets/binding/
