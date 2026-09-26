@@ -1,7 +1,7 @@
-import { Box, Button, Collapse, TextField } from '@mui/material';
-import { useRef, useState } from 'react';
+import { Alert, Box, Button, Collapse, TextField } from '@mui/material';
+import { useEffect, useRef, useState } from 'react';
 import { isAlphanumeric, isEmail, isEmpty } from 'validator';
-import { initiateLogin } from '../services/passkeys';
+import { initiateLogin, signup } from '../services/passkeys';
 
 const enterKey = 'Enter';
 
@@ -28,16 +28,50 @@ function isDisplayNameValid(name: string): boolean {
 }
 
 export default function Login() {
+  const [error, setError] = useState('');
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [emailValid, setEmailValid] = useState(true);
   const [displayNameValid, setDisplayNameValid] = useState(true);
   const [validatingEmail, setValidatingEmail] = useState(false);
   const [requestDisplayName, setRequestDisplayName] = useState(false);
-  const [userId, setUserId] = useState<BufferSource>();
-  const [challenge, setChallenge] = useState<ArrayBuffer>();
+  const [userId, setUserId] = useState<string>('');
+  const [challenge, setChallenge] = useState<string>('');
+  const [authenticationTimeout, setAuthenticationTimeout] = useState(0);
+  const [pubKeyCredParams, setPubKeyCredParams] = useState<
+    PublicKeyCredentialParameters[]
+  >([]);
   const [origin, setOrigin] = useState<string>('');
   const displayNameRef = useRef<HTMLInputElement>(null);
+
+  const clearChallenge = () => {
+    setChallenge('');
+    setUserId('');
+    setRequestDisplayName(false);
+    setAuthenticationTimeout(0);
+    setPubKeyCredParams([]);
+    setOrigin('');
+  };
+
+  useEffect(() => {
+    if (authenticationTimeout < 1 || !challenge) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      // Challenge has expired.
+      clearChallenge();
+
+      // Clear the display name
+      if (displayNameRef.current) {
+        displayNameRef.current.blur();
+        setDisplayName('');
+        displayNameRef.current.value = '';
+      }
+    }, authenticationTimeout);
+
+    return () => clearTimeout(timeout);
+  }, [challenge, authenticationTimeout]);
 
   const emailUpdated = (newEmail: string) => {
     if (isEmpty(newEmail, { ignore_whitespace: true })) {
@@ -83,17 +117,26 @@ export default function Login() {
     try {
       const response = await initiateLogin(email);
       setChallenge(response.challenge);
+      setPubKeyCredParams(response.pubKeyCredParams);
+      setAuthenticationTimeout(response.timeout);
       setOrigin(response.origin);
-      setUserId(response.user.id);
+      setUserId(response.userId);
 
-      if (response.user.displayName) {
+      if (response.availablePublicKeys.length > 0) {
         // User is registered, let's attempt to fetch their credentials.
+        const request = PublicKeyCredential.parseRequestOptionsFromJSON({
+          rpId: response.origin,
+          challenge: response.challenge,
+          allowCredentials: response.availablePublicKeys.map((keyId) => {
+            return {
+              id: keyId,
+              type: 'public-key',
+            };
+          }),
+        });
         const credentials = await navigator.credentials.get({
           mediation: 'required',
-          publicKey: {
-            rpId: response.origin,
-            challenge: response.challenge,
-          },
+          publicKey: request,
         });
         console.log('Credentials', credentials);
       } else {
@@ -110,8 +153,12 @@ export default function Login() {
       return;
     }
 
-    const credentials = await navigator.credentials.create({
-      publicKey: {
+    try {
+      // Clear the challenge, so the timeout stops, and the dispaly name input becomes disabled.
+      setChallenge('');
+
+      // Create the passkey on the device.
+      const request = PublicKeyCredential.parseCreationOptionsFromJSON({
         user: {
           id: userId,
           name: email,
@@ -121,16 +168,28 @@ export default function Login() {
           id: origin,
           name: 'Passkeys Demo',
         },
+        authenticatorSelection: {
+          // This will require biometrics before saving the passkey.
+          // userVerification: 'required',
+        },
         challenge,
-        // These are the recommended algorithms: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#pubkeycredparams
-        pubKeyCredParams: [
-          { type: 'public-key', alg: -7 },
-          { type: 'public-key', alg: -8 },
-          { type: 'public-key', alg: -257 },
-        ],
-      },
-    });
-    console.log('Credentials', credentials);
+        pubKeyCredParams,
+        attestation: 'direct',
+        timeout: authenticationTimeout,
+      });
+      const credentials = (await navigator.credentials.create({
+        publicKey: request,
+      })) as PublicKeyCredential;
+
+      if (credentials) {
+        await signup(email, credentials);
+        // TODO: Sign in the user
+      }
+    } catch (e) {
+      console.error('Failed to create passkey', e);
+      clearChallenge();
+      setError('Failed to create passkey, please try again.');
+    }
   };
 
   const submit = async (key: string) => {
@@ -161,6 +220,7 @@ export default function Login() {
         p: 2,
       }}
     >
+      {error && <Alert severity="error">{error}</Alert>}
       <TextField
         id="email"
         type="email"
@@ -189,6 +249,7 @@ export default function Login() {
             displayNameUpdated(currentTarget.value)
           }
           onKeyDown={({ key }) => submit(key)}
+          disabled={!challenge}
           inputRef={displayNameRef}
           autoComplete="username name"
           slotProps={{ htmlInput: { maxLength: 20 } }}
@@ -200,7 +261,9 @@ export default function Login() {
         variant="contained"
         size="large"
         onClick={() => submit(enterKey)}
-        disabled={!email || validatingEmail}
+        disabled={
+          !email || validatingEmail || (requestDisplayName && !challenge)
+        }
         sx={{ mt: 1 }}
         fullWidth
       >

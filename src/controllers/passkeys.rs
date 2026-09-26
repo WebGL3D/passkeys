@@ -1,37 +1,50 @@
 use std::collections::HashMap;
-use sha2::{Sha256, Digest};
 use axum::{Json};
 use axum::extract::Query;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use serde::{Serialize};
-use base64::{engine::general_purpose::URL_SAFE, Engine};
+use base64::{engine::general_purpose::{URL_SAFE_NO_PAD}, Engine};
 use uuid::Uuid;
 
-/// Maps with [PublicKeyCredentialCreationOptions.user](https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#user)
-#[derive(Serialize)]
-pub struct User {
-    /// The unique ID for the user account.
-    pub id: String,
+const PUBLIC_KEY_TYPE: &str = "public-key";
 
-    /// For the purposes of this app, the user's email address.
-    pub name: String,
+/// Item for [pubKeyCredParams](https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#pubkeycredparams)
+#[derive(Serialize, Clone)]
+pub struct PublicKeyParam {
+    /// A number that is equal to a [COSE Algorithm Identifier](https://www.iana.org/assignments/cose#algorithms).
+    pub alg: i32,
 
-    /// The user's preferred display name.
-    #[serde(rename = "displayName")]
-    pub display_name: String
+    /// The only supported value for now is `public-key`.
+    #[serde(rename = "type")]
+    pub key_type: String,
 }
 
+/// Data that can be used to determine how the user should sign up or log in.
 #[derive(Serialize)]
 pub struct LoginMetadata {
     /// The user that is attempting to log in.
-    pub user: User,
+    #[serde(rename = "userId")]
+    pub user_id: String,
 
     /// The authentication challenge ID.
     pub challenge: String,
 
     /// The origin to use as the `rpId`.
     pub origin: String,
+
+    /// Maps to [pubKeyCredParams](https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#pubkeycredparams)
+    #[serde(rename = "pubKeyCredParams")]
+    pub supported_public_keys: Vec<PublicKeyParam>,
+
+    /// The IDs of the public keys that we can authenticate this user with.
+    ///
+    /// This will be empty if the email address is not associated with any public keys.
+    #[serde(rename = "availablePublicKeys")]
+    pub available_public_keys: Vec<String>,
+
+    /// The timeout (in milliseconds) before the challenge is no longer valid.
+    pub timeout: u32,
 }
 
 /// Error JSON result.
@@ -54,13 +67,19 @@ pub async fn initiate_login(headers: HeaderMap, Query(query): Query<HashMap<Stri
     };
 
     Json(LoginMetadata {
-        user: User {
-            id: URL_SAFE.encode(Sha256::digest(format!("{}:{}", host, email))),
-            name: email.to_string(),
-            display_name: String::from(""),
-        },
-        challenge: URL_SAFE.encode(Uuid::new_v4().as_bytes()),
-        origin: host
+        user_id: URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes()),
+        challenge: URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes()),
+        origin: host,
+        // These are the recommended algorithms: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#pubkeycredparams
+        supported_public_keys: [
+            PublicKeyParam { alg: -7 /* EdDSA */, key_type: String::from(PUBLIC_KEY_TYPE) },
+            PublicKeyParam { alg: -8 /* ES256 */, key_type: String::from(PUBLIC_KEY_TYPE) },
+            PublicKeyParam { alg: -257 /* RS256 */, key_type: String::from(PUBLIC_KEY_TYPE) },
+        ].to_vec(),
+        // Allow the challenge to exist for 5 minutes, before making the user start over.
+        timeout: 300_000,
+        // TODO: Fetch stored public keys for the user.
+        available_public_keys: [].to_vec()
     }).into_response()
 }
 
