@@ -1,7 +1,7 @@
 mod controllers;
 mod env;
 
-use crate::controllers::passkeys::{metadata};
+use crate::controllers::passkeys::{initiate_login};
 use axum::{
     routing::{get},
     Router,
@@ -23,7 +23,7 @@ async fn main() {
 
 fn router() -> Router {
     Router::new()
-        .route("/api/v1/passkeys/metadata", get(metadata))
+        .route("/api/v1/passkeys/initiate-login", get(initiate_login))
 }
 
 async fn shutdown_signal() {
