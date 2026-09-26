@@ -6,6 +6,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use serde::{Serialize};
 use base64::{engine::general_purpose::URL_SAFE, Engine};
+use uuid::Uuid;
 
 /// Maps with [PublicKeyCredentialCreationOptions.user](https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#user)
 #[derive(Serialize)]
@@ -25,6 +26,12 @@ pub struct User {
 pub struct LoginMetadata {
     /// The user that is attempting to log in.
     pub user: User,
+
+    /// The authentication challenge ID.
+    pub challenge: String,
+
+    /// The origin to use as the `rpId`.
+    pub origin: String,
 }
 
 /// Error JSON result.
@@ -51,7 +58,9 @@ pub async fn initiate_login(headers: HeaderMap, Query(query): Query<HashMap<Stri
             id: URL_SAFE.encode(Sha256::digest(format!("{}:{}", host, email))),
             name: email.to_string(),
             display_name: String::from(""),
-        }
+        },
+        challenge: URL_SAFE.encode(Uuid::new_v4().as_bytes()),
+        origin: host
     }).into_response()
 }
 
