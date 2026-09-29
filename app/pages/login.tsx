@@ -170,7 +170,7 @@ export default function Login() {
         },
         authenticatorSelection: {
           // This will require biometrics before saving the passkey.
-          // userVerification: 'required',
+          userVerification: 'required',
         },
         challenge,
         pubKeyCredParams,

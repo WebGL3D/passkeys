@@ -12,7 +12,7 @@ services:
       - '${PASSKEYS_API_PORT:-}:8080'
 
     environment:
-      - 'HELLO=vapid@webgl3d.dev'
+      - 'ORIGIN=http://localhost:${PASSKEYS_APP_PORT}'
 
     env_file:
       - .dev.vars

@@ -10,7 +10,7 @@ export class RustContainer extends Container<Env> {
 
   // Environment variables passed to the container
   envVars = {
-    HELLO: env.HELLO,
+    ORIGIN: env.ORIGIN,
   };
 
   // Optional lifecycle hooks

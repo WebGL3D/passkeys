@@ -50,9 +50,9 @@
    * Note: Use secrets to store sensitive data.
    * https://developers.cloudflare.com/workers/configuration/secrets/
    */
-  "vars": { "HELLO": "world" },
+  "vars": { "ORIGIN": "https://passkeys.webgl3d.dev" },
   "previews": {
-    "vars": { "HELLO": "world" },
+    "vars": { "ORIGIN": "https://passkeys-demo.tixfactory.workers.dev" },
   },
   /**
    * Static Assets
