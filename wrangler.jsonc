@@ -18,6 +18,13 @@
       "max_instances": 10,
     },
   ],
+  "d1_databases": [
+    {
+      "binding": "AUTHENTICATION",
+      "database_name": "authentication",
+      "database_id": "59fa0da6-1dcd-444c-a16c-1b0bbdac3cfe",
+    },
+  ],
   "durable_objects": {
     "bindings": [
       {
