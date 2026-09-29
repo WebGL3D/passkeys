@@ -1,10 +1,10 @@
 mod controllers;
 mod env;
 
-use crate::controllers::passkeys::{initiate_login};
+use crate::controllers::passkeys::{initiate_login, signup};
 use axum::{
-    routing::{get},
     Router,
+    routing::{get, post},
 };
 
 #[tokio::main]
@@ -24,6 +24,7 @@ async fn main() {
 fn router() -> Router {
     Router::new()
         .route("/api/v1/passkeys/initiate-login", get(initiate_login))
+        .route("/api/v1/passkeys/signup", post(signup))
 }
 
 async fn shutdown_signal() {
