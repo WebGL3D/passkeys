@@ -7,6 +7,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use email_address::{EmailAddress, Options};
 use pem::{Pem, encode};
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -87,8 +88,8 @@ pub struct Error {
 
 /// The endpoint used by the web app to load passkey information about the user, from their email address.
 pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> impl IntoResponse {
-    let email = match fetch_email(query) {
-        Ok(email) => email,
+    let _email_hash = match fetch_email(query) {
+        Ok(email) => hash_email(email),
         Err(e) => {
             return (StatusCode::BAD_REQUEST, Json(Error { error: e })).into_response();
         }
@@ -170,7 +171,7 @@ pub async fn signup(
     StatusCode::CREATED.into_response()
 }
 
-fn parse_public_key(base64: String, algorithm: i32) -> Result<Pem, Response> {
+fn parse_public_key(base64: String, _algorithm: i32) -> Result<Pem, Response> {
     // TODO: Figure out what to do with the public key algorithm
     match URL_SAFE_NO_PAD.decode(base64) {
         // TODO: Verify the "PUBLIC KEY" tag is what we need here
@@ -204,6 +205,15 @@ fn fetch_email(query: HashMap<String, String>) -> Result<String, String> {
     }
 }
 
+/// Hashes an email address, so it can't be mapped back to its original value.
+fn hash_email(email: String) -> String {
+    let email_hash = sha2::Sha256::digest(format!("email:{email}").as_bytes());
+    let email_hex = hex::encode(email_hash);
+
+    // The first 32 characters should be reasonable enough for a demo...
+    String::from(&email_hex[0..32])
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -234,5 +244,11 @@ mod test {
                 "Expected error was not returned"
             );
         }
+    }
+
+    #[rstest]
+    #[case("vapid@webgl3d.dev", "c9ca94190f3d5ef771f63acce3644c15")]
+    fn test_hash_email(#[case] email: String, #[case] expected: String) {
+        assert_eq!(hash_email(email), expected);
     }
 }
