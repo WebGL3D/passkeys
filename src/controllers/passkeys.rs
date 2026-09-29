@@ -86,12 +86,61 @@ pub struct Error {
     error: String,
 }
 
+/// The passkey record from the database.
+#[derive(Deserialize)]
+pub struct Passkey {
+    /// Maps to [PublicKeyCredential.id](https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredential/id)
+    id: String,
+
+    /// The public key PEM that belongs to the passkey.
+    public_key: String,
+
+    /// A hash of the email address for the user associated with the passkey.
+    email_hash: String,
+
+    /// How many times the private key has signed a challenge.
+    count: i32,
+}
+
 /// The endpoint used by the web app to load passkey information about the user, from their email address.
 pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> impl IntoResponse {
-    let _email_hash = match fetch_email(query) {
-        Ok(email) => hash_email(email),
+    let passkeys_response = match fetch_email(query) {
+        Ok(email) => {
+            reqwest::get(format!(
+                "http://d1.webgl3d.dev/query?name=SELECT_PASSKEYS&arg={}",
+                hash_email(email)
+            ))
+            .await
+        }
         Err(e) => {
+            // Failed to parse a valid email address from the query string.
             return (StatusCode::BAD_REQUEST, Json(Error { error: e })).into_response();
+        }
+    };
+
+    let passkeys: Vec<String> = match passkeys_response {
+        Ok(response) => match response.json::<Vec<Passkey>>().await {
+            Ok(passkeys) => passkeys.into_iter().map(|p| p.id).collect(),
+            Err(e) => {
+                println!("Failed to parse passkeys query: {e}");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(Error {
+                        error: String::from("Unexpected error occurred, please try again."),
+                    }),
+                )
+                    .into_response();
+            }
+        },
+        Err(e) => {
+            println!("Failed to send query back to container: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(Error {
+                    error: String::from("Unexpected error occurred, please try again."),
+                }),
+            )
+                .into_response();
         }
     };
 
@@ -117,8 +166,7 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
         .to_vec(),
         // Allow the challenge to exist for 5 minutes, before making the user start over.
         timeout: 300_000,
-        // TODO: Fetch stored public keys for the user.
-        available_public_keys: [].to_vec(),
+        available_public_keys: passkeys,
     })
     .into_response()
 }
