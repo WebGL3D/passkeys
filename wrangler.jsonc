@@ -6,7 +6,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "passkeys-demo",
   "main": "worker/index.ts",
-  "compatibility_date": "2025-10-08",
+  "compatibility_date": "2026-09-08",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
@@ -57,7 +57,10 @@
    * Note: Use secrets to store sensitive data.
    * https://developers.cloudflare.com/workers/configuration/secrets/
    */
-  "vars": { "ORIGIN": "https://passkeys.webgl3d.dev" },
+  "vars": {
+    "ORIGIN": "https://passkeys.webgl3d.dev",
+    "CHALLENGE_EXPIRATION_SECONDS": "300",
+  },
   "previews": {
     "vars": { "ORIGIN": "https://passkeys-demo.tixfactory.workers.dev" },
   },

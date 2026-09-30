@@ -1,4 +1,5 @@
 mod controllers;
+mod db;
 mod env;
 
 use crate::controllers::passkeys::{initiate_login, signup};

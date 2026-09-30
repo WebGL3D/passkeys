@@ -31,9 +31,12 @@ ENTRYPOINT ["npx", "serve", "/app/build"]
 
 # Rust application
 FROM rust:1.98.1 AS server-build
-COPY . /app
+COPY Cargo.toml /app/Cargo.toml
+COPY Cargo.lock /app/Cargo.lock
+COPY src /app/src
 WORKDIR /app
-RUN cargo build --release
+RUN mkdir dist
+RUN --mount=type=cache,id=cargo,target=/app/target cargo build --release && cp /app/target/release/passkeys-demo /app/dist/passkeys-demo
 
 # Run tests (once written)
 # RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
@@ -45,6 +48,6 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=server-build /app/target/release/passkeys-demo .
+COPY --from=server-build /app/dist/passkeys-demo .
 EXPOSE 8080
 CMD ["./passkeys-demo"]

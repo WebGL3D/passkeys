@@ -1,17 +1,21 @@
+use crate::db::{create_challenge, redeem_challenge, select_passkeys};
 use crate::env::{HOST_NAME, ORIGIN};
-use axum::Json;
-use axum::extract::Query;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::{
+    Json,
+    extract::Query,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use chrono::Utc;
 use email_address::{EmailAddress, Options};
 use pem::{Pem, encode};
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
-use std::collections::HashMap;
+use std::{collections::HashMap, error::Error};
 use uuid::Uuid;
 
 const PUBLIC_KEY_TYPE: &str = "public-key";
+const UNEXPECTED_ERROR: &str = "An unexpected error occurred, please try again.";
 
 /// Item for [pubKeyCredParams](https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#pubkeycredparams)
 #[derive(Serialize, Clone)]
@@ -48,7 +52,7 @@ pub struct LoginMetadata {
     pub available_public_keys: Vec<String>,
 
     /// The timeout (in milliseconds) before the challenge is no longer valid.
-    pub timeout: u32,
+    pub timeout: i64,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +73,20 @@ pub struct CredentialResponse {
     public_key_algorithm: i32,
 }
 
+/// Maps to [AuthenticatorResponse.clientDataJSON](https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorResponse/clientDataJSON)
+#[derive(Serialize, Deserialize)]
+pub struct ClientData {
+    /// `webauthn.create` OR `webauthn.get`
+    #[serde(rename = "type")]
+    authn_type: String,
+
+    /// The challenge token.
+    challenge: String,
+
+    /// The origin the passkey was created on.
+    origin: String,
+}
+
 #[derive(Deserialize)]
 pub struct SignupRequest {
     id: String,
@@ -81,63 +99,44 @@ pub struct SignupRequest {
 
 /// Error JSON result.
 #[derive(Serialize)]
-pub struct Error {
+pub struct ErrorJson {
     /// Error message.
     error: String,
 }
 
-/// The passkey record from the database.
-#[derive(Deserialize)]
-pub struct Passkey {
-    /// Maps to [PublicKeyCredential.id](https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredential/id)
-    id: String,
-
-    /// The public key PEM that belongs to the passkey.
-    public_key: String,
-
-    /// A hash of the email address for the user associated with the passkey.
-    email_hash: String,
-
-    /// How many times the private key has signed a challenge.
-    count: i32,
-}
-
 /// The endpoint used by the web app to load passkey information about the user, from their email address.
 pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> impl IntoResponse {
-    let passkeys_response = match fetch_email(query) {
-        Ok(email) => {
-            reqwest::get(format!(
-                "http://d1.webgl3d.dev/query?name=SELECT_PASSKEYS&arg={}",
-                hash_email(email)
-            ))
-            .await
-        }
-        Err(e) => {
-            // Failed to parse a valid email address from the query string.
-            return (StatusCode::BAD_REQUEST, Json(Error { error: e })).into_response();
+    let email = match fetch_email(query) {
+        Ok(e) => e,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorJson { error: e })).into_response(),
+    };
+
+    let challenge = match create_challenge(email.clone()).await {
+        Ok(c) => c,
+        Err(err) => {
+            println!("Failed to create challenge: {err}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorJson {
+                    error: String::from(UNEXPECTED_ERROR),
+                }),
+            )
+                .into_response();
         }
     };
 
-    let passkeys: Vec<String> = match passkeys_response {
-        Ok(response) => match response.json::<Vec<Passkey>>().await {
-            Ok(passkeys) => passkeys.into_iter().map(|p| p.id).collect(),
-            Err(e) => {
-                println!("Failed to parse passkeys query: {e}");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(Error {
-                        error: String::from("Unexpected error occurred, please try again."),
-                    }),
-                )
-                    .into_response();
-            }
-        },
+    let passkeys: Vec<String> = match select_passkeys(email).await {
+        Ok(response) => response.into_iter().map(|p| p.id).collect(),
         Err(e) => {
-            println!("Failed to send query back to container: {e}");
+            println!(
+                "Failed to send query back to container: {} - {}",
+                e.to_string(),
+                e.source().unwrap()
+            );
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(Error {
-                    error: String::from("Unexpected error occurred, please try again."),
+                Json(ErrorJson {
+                    error: String::from(UNEXPECTED_ERROR),
                 }),
             )
                 .into_response();
@@ -146,7 +145,7 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
 
     Json(LoginMetadata {
         user_id: URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes()),
-        challenge: URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes()),
+        challenge: challenge.id,
         origin: HOST_NAME.to_string(),
         // These are the recommended algorithms: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#pubkeycredparams
         supported_public_keys: [
@@ -164,8 +163,8 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
             },
         ]
         .to_vec(),
-        // Allow the challenge to exist for 5 minutes, before making the user start over.
-        timeout: 300_000,
+        // 1 second accounting for latency
+        timeout: challenge.expiration - (Utc::now().timestamp() * 1000) - 1000,
         available_public_keys: passkeys,
     })
     .into_response()
@@ -179,20 +178,42 @@ pub async fn signup(
     let email = match fetch_email(query) {
         Ok(email) => email,
         Err(e) => {
-            return (StatusCode::BAD_REQUEST, Json(Error { error: e })).into_response();
+            return (StatusCode::BAD_REQUEST, Json(ErrorJson { error: e })).into_response();
         }
     };
 
+    let client_data = match parse_client_data(request.response.client_data_json) {
+        Ok(c) => c,
+        Err(err) => {
+            println!("Failed to parse clientDataJSON: {err}");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorJson {
+                    error: String::from("Invalid clientDataJSON"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let challenge = match redeem_challenge(client_data.challenge.clone(), email.clone()).await {
+        Ok(c) => c,
+        Err(err) => {
+            println!("Failed to redeem challenge: {err}");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorJson {
+                    error: String::from("Invalid challenge token"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    println!("challenge: {}", challenge.id);
     println!("email: {}", email);
     println!("Host: {}", ORIGIN.as_str());
-    println!(
-        "clientDataJSON: {:?}",
-        String::from_utf8(
-            URL_SAFE_NO_PAD
-                .decode(request.response.client_data_json)
-                .unwrap()
-        )
-    );
+    println!("clientDataJSON: {:?}", serde_json::to_string(&client_data));
     println!(
         "authenticatorData: {:?}",
         URL_SAFE_NO_PAD
@@ -226,7 +247,7 @@ fn parse_public_key(base64: String, _algorithm: i32) -> Result<Pem, Response> {
         Ok(bytes) => Ok(Pem::new("PUBLIC KEY", bytes)),
         Err(_) => Err((
             StatusCode::BAD_REQUEST,
-            Json(Error {
+            Json(ErrorJson {
                 error: String::from("Public key could not be parsed"),
             }),
         )
@@ -253,13 +274,21 @@ fn fetch_email(query: HashMap<String, String>) -> Result<String, String> {
     }
 }
 
-/// Hashes an email address, so it can't be mapped back to its original value.
-fn hash_email(email: String) -> String {
-    let email_hash = sha2::Sha256::digest(format!("email:{email}").as_bytes());
-    let email_hex = hex::encode(email_hash);
+fn parse_client_data(client_data_json: String) -> Result<ClientData, String> {
+    let client_data = match URL_SAFE_NO_PAD.decode(client_data_json) {
+        Ok(json_bytes) => String::from_utf8(json_bytes),
+        Err(_) => return Err(String::from("Failed base64 decode")),
+    };
 
-    // The first 32 characters should be reasonable enough for a demo...
-    String::from(&email_hex[0..32])
+    let json = match client_data {
+        Ok(json) => serde_json::from_str::<ClientData>(json.as_str()),
+        Err(_) => return Err(String::from("Failed String::from_utf8")),
+    };
+
+    match json {
+        Ok(client_data) => Ok(client_data),
+        Err(_) => Err(String::from("serde_json::from_str")),
+    }
 }
 
 #[cfg(test)]
@@ -292,11 +321,5 @@ mod test {
                 "Expected error was not returned"
             );
         }
-    }
-
-    #[rstest]
-    #[case("vapid@webgl3d.dev", "c9ca94190f3d5ef771f63acce3644c15")]
-    fn test_hash_email(#[case] email: String, #[case] expected: String) {
-        assert_eq!(hash_email(email), expected);
     }
 }

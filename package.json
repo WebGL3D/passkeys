@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
-    "@cloudflare/containers": "0.0.30",
+    "@cloudflare/containers": "^0.3.7",
     "@eslint/js": "^10.0.1",
     "@rolldown/plugin-babel": "^0.2.3",
     "@types/babel__core": "^7.20.5",
