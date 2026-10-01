@@ -174,7 +174,7 @@ export default function Login() {
         },
         challenge,
         pubKeyCredParams,
-        attestation: 'direct',
+        attestation: 'none',
         timeout: authenticationTimeout,
       });
       const credentials = (await navigator.credentials.create({

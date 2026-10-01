@@ -2,6 +2,7 @@ use crate::env::HOST_NAME;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bitflags::bitflags;
+use serde::Deserialize;
 use sha2::Digest;
 use uuid::Uuid;
 
@@ -56,7 +57,43 @@ pub struct AuthenticatorData {
     /// Encoded as Base64, URL safe, no padding.
     pub credential_id: Option<String>,
 
+    /// TODO: This property is not set, yet.
     pub credential_public_key: Option<String>,
+}
+
+/// TODO: This is missing the attestation statement (attStmt).
+pub struct AttestationObject {
+    /// A text string that indicates the format of the attestation statement.
+    ///
+    /// # Examples
+    /// Common Values:
+    /// - `none`
+    /// - `packed`
+    /// - `tpm`
+    /// - `android-key`
+    /// - `android-safetynet`
+    /// - `fido-u2f`
+    ///
+    /// # Notes
+    /// For passkeys that are synced between devices (e.g. Apple/iCloud), the attestation format will always be `none`.
+    ///
+    /// See also: [Defined Attestation Statement Formats](https://w3c.github.io/webauthn/#sctn-defined-attestation-formats), [IANA Registry](https://w3c.github.io/webauthn/#sctn-att-fmt-reg)
+    pub format: String,
+
+    /// The authenticator data, parsed from the attestation object.
+    pub authenticator_data: AuthenticatorData,
+}
+
+/// The (raw) parsed [attestationObject](https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAttestationResponse/attestationObject).
+#[derive(Debug, Deserialize)]
+struct InternalAttestationObject {
+    #[serde(rename = "authData")]
+    auth_data: Vec<u8>,
+
+    fmt: String,
+
+    #[serde(rename = "attStmt")]
+    att_stmt: ciborium::Value,
 }
 
 /// Parses [authenticatorData](https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API/Authenticator_data)
@@ -137,5 +174,32 @@ pub fn parse_authenticator_data(authenticator_data: String) -> Result<Authentica
         authenticator_attestation_guid,
         credential_id,
         credential_public_key,
+    })
+}
+
+/// Parses [attestationObject](https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAttestationResponse/attestationObject)
+pub fn parse_attestation_object(attestation_object: String) -> Result<AttestationObject, String> {
+    let parsed_data = match URL_SAFE_NO_PAD.decode(attestation_object) {
+        Ok(parsed_data) => {
+            ciborium::from_reader::<InternalAttestationObject, &[u8]>(parsed_data.as_slice())
+        }
+        Err(err) => return Err(format!("Failed to decode attestation object: {err}")),
+    };
+
+    let attestation_map = match parsed_data {
+        Ok(a) => a,
+        Err(err) => return Err(format!("Failed to parse attestation object: {err}")),
+    };
+
+    let authenticator_data = match parse_authenticator_data(
+        URL_SAFE_NO_PAD.encode(attestation_map.auth_data.as_slice()),
+    ) {
+        Ok(a) => a,
+        Err(err) => return Err(format!("Failed to decode authData: {err}")),
+    };
+
+    Ok(AttestationObject {
+        format: attestation_map.fmt,
+        authenticator_data,
     })
 }

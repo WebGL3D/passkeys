@@ -1,6 +1,6 @@
 use crate::db::{create_challenge, redeem_challenge, select_passkeys};
 use crate::env::{HOST_NAME, ORIGIN};
-use crate::webauthn::parse_authenticator_data;
+use crate::webauthn::{parse_attestation_object, parse_authenticator_data};
 use axum::{
     Json,
     extract::Query,
@@ -249,12 +249,21 @@ pub async fn signup(
         "credential_public_key: {:?}",
         authenticator_data.credential_public_key
     );
-    println!(
-        "attestationObject: {:?}",
-        URL_SAFE_NO_PAD
-            .decode(request.response.attestation_object)
-            .unwrap()
-    );
+
+    let attestation_object = match parse_attestation_object(request.response.attestation_object) {
+        Ok(a) => a,
+        Err(err) => {
+            println!("Failed to parse attestationObject: {err}");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorJson {
+                    error: String::from("Invalid attestationObject"),
+                }),
+            )
+                .into_response();
+        }
+    };
+    println!("attestationObject.fmt: {}", attestation_object.format);
 
     match parse_public_key(
         request.response.public_key,
