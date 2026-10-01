@@ -12,7 +12,7 @@ const PASSKEYS_CREATE_TABLE = `CREATE TABLE IF NOT EXISTS passkeys(
   public_key TEXT,
 
   /* How many times the private key has signed a challenge */
-  count      INTEGER,
+  sign_count      INTEGER,
 
   created    DATETIME
 );

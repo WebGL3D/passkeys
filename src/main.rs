@@ -1,6 +1,7 @@
 mod controllers;
 mod db;
 mod env;
+mod webauthn;
 
 use crate::controllers::passkeys::{initiate_login, signup};
 use axum::{

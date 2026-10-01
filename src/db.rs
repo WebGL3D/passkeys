@@ -17,7 +17,7 @@ pub struct Passkey {
     pub email_hash: String,
 
     /// How many times the private key has signed a challenge.
-    pub count: i32,
+    pub sign_count: u32,
 }
 
 /// The challenge record from the database.

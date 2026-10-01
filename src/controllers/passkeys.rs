@@ -1,5 +1,6 @@
 use crate::db::{create_challenge, redeem_challenge, select_passkeys};
 use crate::env::{HOST_NAME, ORIGIN};
+use crate::webauthn::parse_authenticator_data;
 use axum::{
     Json,
     extract::Query,
@@ -210,15 +211,43 @@ pub async fn signup(
         }
     };
 
+    let authenticator_data = match parse_authenticator_data(request.response.authenticator_data) {
+        Ok(a) => a,
+        Err(err) => {
+            println!("Failed to parse authenticatorData: {err}");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorJson {
+                    error: String::from("Invalid authenticatorData"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
     println!("challenge: {}", challenge.id);
     println!("email: {}", email);
     println!("Host: {}", ORIGIN.as_str());
     println!("clientDataJSON: {:?}", serde_json::to_string(&client_data));
     println!(
-        "authenticatorData: {:?}",
-        URL_SAFE_NO_PAD
-            .decode(request.response.authenticator_data)
-            .unwrap()
+        "flags ({}): {}",
+        authenticator_data.flags.iter().count(),
+        authenticator_data
+            .flags
+            .iter()
+            .map(|f| format!("{:?}", f))
+            .collect::<Vec<String>>()
+            .join(", ")
+    );
+    println!("sign_count: {}", authenticator_data.sign_count);
+    println!(
+        "authenticator_attestation_guid: {:?}",
+        authenticator_data.authenticator_attestation_guid
+    );
+    println!("credential_id: {:?}", authenticator_data.credential_id);
+    println!(
+        "credential_public_key: {:?}",
+        authenticator_data.credential_public_key
     );
     println!(
         "attestationObject: {:?}",
