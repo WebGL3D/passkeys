@@ -1,4 +1,5 @@
 mod controllers;
+mod cookies;
 mod db;
 mod env;
 mod webauthn;

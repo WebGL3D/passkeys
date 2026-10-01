@@ -1,9 +1,6 @@
 import QUERIES from '../queries.ts';
 
-export async function query(
-  url: URL,
-  env: Env,
-): Promise<Response> {
+export async function query(url: URL, env: Env): Promise<Response> {
   const name = url.searchParams.get('name') || '';
   const query = QUERIES[name];
   if (!query) {
@@ -13,6 +10,7 @@ export async function query(
       headers: { 'Content-Type': 'application/json' },
     });
   }
+
   // Fetch query parameters
   const queryParameters: string[] = [];
   url.searchParams.forEach((value, key) => {

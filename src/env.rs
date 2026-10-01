@@ -2,6 +2,14 @@ use std::env;
 use std::sync::LazyLock;
 use url::Url;
 
+/// Reads the `JWT__PUBLIC_KEY` from the environment variables.
+pub static JWT_PUBLIC_KEY: LazyLock<String> =
+    LazyLock::new(|| env::var("JWT__PUBLIC_KEY").expect("JWT__PUBLIC_KEY is not set."));
+
+/// Reads the `JWT__PRIVATE_KEY` from the environment variables.
+pub static JWT_PRIVATE_KEY: LazyLock<String> =
+    LazyLock::new(|| env::var("JWT__PRIVATE_KEY").expect("JWT__PRIVATE_KEY is not set."));
+
 /// The `ORIGIN` environment variable.
 /// This is used to determine which host (with scheme) the passkeys belong to.
 pub static ORIGIN: LazyLock<Url> = LazyLock::new(|| {

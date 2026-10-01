@@ -61,6 +61,9 @@
     "ORIGIN": "https://passkeys.webgl3d.dev",
     "CHALLENGE_EXPIRATION_SECONDS": "300",
   },
+  "secrets": {
+    "required": ["JWT__PRIVATE_KEY", "JWT__PUBLIC_KEY"],
+  },
   "previews": {
     "vars": { "ORIGIN": "https://passkeys-demo.tixfactory.workers.dev" },
   },

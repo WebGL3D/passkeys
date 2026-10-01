@@ -2,9 +2,11 @@
 name = "passkeys-demo"
 version = "1.0.0"
 edition = "2024"
+publish = false
 
 [dependencies]
 axum = { version = "0.8", default-features = true, features = ['json'] }
+axum-extra = { version = "0.12.6", features = ["cookie"] }
 serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["full"] }
 sha2 = "0.11.0"
@@ -19,6 +21,8 @@ serde_json = "1.0.151"
 chrono = "0.4.45"
 bitflags = "2.13.2"
 ciborium = "0.2.2"
+jsonwebtoken = { version = "11.1.0", features = ["rust_crypto"] }
+time = "0.3.55"
 
 [dev-dependencies]
 rstest = "0.27.0"

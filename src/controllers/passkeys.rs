@@ -1,4 +1,5 @@
-use crate::db::{create_challenge, redeem_challenge, select_passkeys};
+use crate::cookies::{AuthCookie, authenticate};
+use crate::db::{create_challenge, insert_passkey, redeem_challenge, select_passkeys};
 use crate::env::{HOST_NAME, ORIGIN};
 use crate::webauthn::{parse_attestation_object, parse_authenticator_data};
 use axum::{
@@ -7,6 +8,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use axum_extra::extract::CookieJar;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use email_address::{EmailAddress, Options};
@@ -53,7 +55,7 @@ pub struct LoginMetadata {
     pub available_public_keys: Vec<String>,
 
     /// The timeout (in milliseconds) before the challenge is no longer valid.
-    pub timeout: i64,
+    pub timeout: u64,
 }
 
 #[derive(Deserialize)]
@@ -165,7 +167,7 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
         ]
         .to_vec(),
         // 1 second accounting for latency
-        timeout: challenge.expiration - (Utc::now().timestamp() * 1000) - 1000,
+        timeout: challenge.expiration - ((Utc::now().timestamp() * 1000) as u64) - 1000,
         available_public_keys: passkeys,
     })
     .into_response()
@@ -173,13 +175,17 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
 
 /// Creates a new user, with their registered passkey.
 pub async fn signup(
+    cookies: CookieJar,
     Query(query): Query<HashMap<String, String>>,
     Json(request): Json<SignupRequest>,
-) -> impl IntoResponse {
+) -> (CookieJar, impl IntoResponse) {
     let email = match fetch_email(query) {
         Ok(email) => email,
         Err(e) => {
-            return (StatusCode::BAD_REQUEST, Json(ErrorJson { error: e })).into_response();
+            return (
+                cookies,
+                (StatusCode::BAD_REQUEST, Json(ErrorJson { error: e })).into_response(),
+            );
         }
     };
 
@@ -188,12 +194,15 @@ pub async fn signup(
         Err(err) => {
             println!("Failed to parse clientDataJSON: {err}");
             return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorJson {
-                    error: String::from("Invalid clientDataJSON"),
-                }),
-            )
-                .into_response();
+                cookies,
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorJson {
+                        error: String::from("Invalid clientDataJSON"),
+                    }),
+                )
+                    .into_response(),
+            );
         }
     };
 
@@ -202,12 +211,15 @@ pub async fn signup(
         Err(err) => {
             println!("Failed to redeem challenge: {err}");
             return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorJson {
-                    error: String::from("Invalid challenge token"),
-                }),
-            )
-                .into_response();
+                cookies,
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorJson {
+                        error: String::from("Invalid challenge token"),
+                    }),
+                )
+                    .into_response(),
+            );
         }
     };
 
@@ -216,12 +228,15 @@ pub async fn signup(
         Err(err) => {
             println!("Failed to parse authenticatorData: {err}");
             return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorJson {
-                    error: String::from("Invalid authenticatorData"),
-                }),
-            )
-                .into_response();
+                cookies,
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorJson {
+                        error: String::from("Invalid authenticatorData"),
+                    }),
+                )
+                    .into_response(),
+            );
         }
     };
 
@@ -255,27 +270,75 @@ pub async fn signup(
         Err(err) => {
             println!("Failed to parse attestationObject: {err}");
             return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorJson {
-                    error: String::from("Invalid attestationObject"),
-                }),
-            )
-                .into_response();
+                cookies,
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorJson {
+                        error: String::from("Invalid attestationObject"),
+                    }),
+                )
+                    .into_response(),
+            );
         }
     };
     println!("attestationObject.fmt: {}", attestation_object.format);
 
-    match parse_public_key(
+    let public_key = match parse_public_key(
         request.response.public_key,
         request.response.public_key_algorithm,
     ) {
-        Ok(public_key) => {
-            println!("publicKey: {:?}", encode(&public_key));
-        }
-        Err(e) => return e,
+        Ok(public_key) => encode(&public_key),
+        Err(res) => return (cookies, res),
     };
 
-    StatusCode::CREATED.into_response()
+    println!("public_key: {public_key}");
+    match insert_passkey(
+        attestation_object,
+        public_key,
+        request.response.public_key_algorithm,
+        email.to_string(),
+    )
+    .await
+    {
+        Ok(_) => {
+            match authenticate(
+                cookies.clone(),
+                AuthCookie {
+                    sub: email,
+                    exp: (Utc::now().timestamp() + (time::Duration::days(7).whole_seconds()))
+                        as usize,
+                },
+            ) {
+                Ok(c) => (c, StatusCode::CREATED.into_response()),
+                Err(err) => {
+                    println!("Failed to update cookie jar after passkey saved: {err}");
+                    (
+                        cookies,
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ErrorJson {
+                                error: UNEXPECTED_ERROR.to_string(),
+                            }),
+                        )
+                            .into_response(),
+                    )
+                }
+            }
+        }
+        Err(err) => {
+            println!("Failed to save passkey to database: {err}");
+            (
+                cookies,
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorJson {
+                        error: UNEXPECTED_ERROR.to_string(),
+                    }),
+                )
+                    .into_response(),
+            )
+        }
+    }
 }
 
 fn parse_public_key(base64: String, _algorithm: i32) -> Result<Pem, Response> {

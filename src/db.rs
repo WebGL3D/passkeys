@@ -1,3 +1,5 @@
+use crate::webauthn::AttestationObject;
+use axum::response::IntoResponse;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reqwest::Error;
 use serde::{Deserialize, de::DeserializeOwned};
@@ -13,11 +15,17 @@ pub struct Passkey {
     /// The public key PEM that belongs to the passkey.
     pub public_key: String,
 
+    /// The algorithm for the `public_key`.
+    pub public_key_algorithm: i32,
+
     /// A hash of the email address for the user associated with the passkey.
     pub email_hash: String,
 
     /// How many times the private key has signed a challenge.
     pub sign_count: u32,
+
+    /// The milliseconds after epoch when the passkey was registered.
+    pub created: u64,
 }
 
 /// The challenge record from the database.
@@ -29,8 +37,8 @@ pub struct Challenge {
     /// A hash of the email address the challenge can be redeemed for.
     pub email_hash: String,
 
-    /// The seconds after epoch when the challenge will expire.
-    pub expiration: i64,
+    /// The milliseconds after epoch when the challenge will expire.
+    pub expiration: u64,
 }
 
 /// Executes a database query by its name, with a list of arguments.
@@ -81,7 +89,10 @@ pub async fn redeem_challenge(id: String, email: String) -> Result<Challenge, St
     match db1_query::<Challenge>("CHALLENGES_REDEEM", vec![id]).await {
         Ok(challenges) => match challenges.first() {
             Some(challenge) => {
-                if challenge.email_hash != hash_email(email) {}
+                if challenge.email_hash != hash_email(email) {
+                    return Err(String::from("Email did not match challenge"));
+                }
+
                 Ok(Challenge {
                     // TODO: Is there a better way to do this, maybe with clone()?
                     id: challenge.id.to_string(),
@@ -92,7 +103,55 @@ pub async fn redeem_challenge(id: String, email: String) -> Result<Challenge, St
 
             None => Err(String::from("No challenge was returned from redeem query.")),
         },
-        Err(_) => Err(String::from("Failed to redeem challenge from database.")),
+        Err(err) => Err(format!("Failed to redeem challenge from database: {err}")),
+    }
+}
+
+pub async fn insert_passkey(
+    attestation_object: AttestationObject,
+    public_key: String,
+    public_key_algorithm: i32,
+    email: String,
+) -> Result<Passkey, String> {
+    let credential_id = match attestation_object.authenticator_data.credential_id {
+        Some(c) => c,
+        None => return Err(String::from("Invalid credential ID")),
+    };
+
+    // TODO: Read from here, instead of having the value passed in.
+    /*
+    let credential_public_key = match attestation_object.authenticator_data.credential_public_key {
+        Some(k) => k,
+        None => return Err(String::from("Invalid credential public key")),
+    };
+    // */
+
+    match db1_query::<Passkey>(
+        "PASSKEYS_INSERT",
+        vec![
+            credential_id,
+            hash_email(email),
+            public_key,
+            public_key_algorithm.to_string(),
+        ],
+    )
+    .await
+    {
+        Ok(passkeys) => match passkeys.first() {
+            Some(passkey) => {
+                Ok(Passkey {
+                    // TODO: Is there a better way to do this, maybe with clone()?
+                    id: passkey.id.to_string(),
+                    email_hash: passkey.email_hash.to_string(),
+                    public_key: passkey.public_key.to_string(),
+                    public_key_algorithm: passkey.public_key_algorithm,
+                    sign_count: passkey.sign_count,
+                    created: passkey.created,
+                })
+            }
+            None => Err(String::from("No passkey was returned from insert query.")),
+        },
+        Err(err) => Err(format!("Failed to insert passkey into database: {err}")),
     }
 }
 
