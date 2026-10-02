@@ -202,6 +202,37 @@ pub async fn signup(
         }
     };
 
+    if match select_passkeys(email.clone()).await {
+        Ok(response) => response.len() > 0,
+        Err(err) => {
+            println!("Failed to query for existing passkeys: {err}");
+            return (
+                cookies,
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorJson {
+                        error: String::from(UNEXPECTED_ERROR),
+                    }),
+                )
+                    .into_response(),
+            );
+        }
+    } {
+        // Can't sign up with passkey if the email already has a passkey associated with it.
+        return (
+            cookies,
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorJson {
+                    error: String::from(
+                        "Passkey already exists for email address, sign in instead.",
+                    ),
+                }),
+            )
+                .into_response(),
+        );
+    }
+
     let client_data = match parse_client_data(request.response.client_data_json) {
         Ok(c) => c,
         Err(err) => {
