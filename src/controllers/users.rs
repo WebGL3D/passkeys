@@ -1,5 +1,5 @@
-use crate::cookies::{authenticate, fetch};
-use crate::db::update_email as db1_update_email;
+use crate::cookies::{authenticate, clear, fetch};
+use crate::db::{delete_user, update_email as db1_update_email};
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
 use email_address::{EmailAddress, Options};
@@ -64,6 +64,25 @@ pub async fn update_email(
         }
         Err(err) => {
             println!("Failed to update passkeys with new email address: {err}");
+            (cookies, StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        }
+    }
+}
+
+/// Deletes a user "account", i.e. all of their stored passkeys.
+pub async fn delete_account(cookies: CookieJar) -> (CookieJar, impl IntoResponse) {
+    let email = match fetch(cookies.clone()) {
+        Ok(user) => user.sub,
+        Err(_) => return (cookies, StatusCode::UNAUTHORIZED.into_response()),
+    };
+
+    match delete_user(email).await {
+        Ok(passkeys) => {
+            println!("Deleted user with {} passkeys", passkeys.len());
+            (clear(cookies), StatusCode::NO_CONTENT.into_response())
+        }
+        Err(err) => {
+            println!("Failed to delete user: {err}");
             (cookies, StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
     }

@@ -172,6 +172,14 @@ pub async fn update_email(
     }
 }
 
+/// Deletes all data about a user, by their email address.
+pub async fn delete_user(email: String) -> Result<Vec<Passkey>, String> {
+    match db1_query::<Passkey>("USERS_DELETE", vec![hash_email(email)]).await {
+        Ok(passkeys) => Ok(passkeys),
+        Err(err) => Err(format!("Failed to delete user from database: {err}")),
+    }
+}
+
 /// Hashes an email address, so it can't be mapped back to its original value.
 fn hash_email(email: String) -> String {
     let email_hash = sha2::Sha256::digest(format!("email:{email}").as_bytes());

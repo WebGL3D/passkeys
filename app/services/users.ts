@@ -23,10 +23,27 @@ export async function getAuthenticatedUser(): Promise<User | null> {
 export async function updateEmail(emailAddress: string): Promise<void> {
   const response = await fetch('/api/v1/users/email', {
     credentials: 'include',
+    method: 'POST',
     body: JSON.stringify({ emailAddress }),
     headers: {
       'Content-Type': 'application/json',
     },
+  });
+
+  if (!response.ok) {
+    return Promise.reject(
+      `Failed to update email address - error code: ${response.status}`,
+    );
+  }
+
+  return Promise.resolve();
+}
+
+// Deletes the currently authenticated user account.
+export async function deleteAccount(): Promise<void> {
+  const response = await fetch('/api/v1/users/authenticated', {
+    credentials: 'include',
+    method: 'DELETE',
   });
 
   if (!response.ok) {
