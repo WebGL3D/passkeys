@@ -1,5 +1,6 @@
 use crate::env::{JWT_PRIVATE_KEY, JWT_PUBLIC_KEY};
 use axum_extra::extract::{CookieJar, cookie::Cookie};
+use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 
@@ -33,17 +34,25 @@ pub fn fetch(cookies: CookieJar) -> Result<AuthCookie, String> {
 }
 
 /// Authenticates the cookie jar with a JWT.
-pub fn authenticate(cookies: CookieJar, auth_cookie: AuthCookie) -> Result<CookieJar, String> {
+pub fn authenticate(cookies: CookieJar, email: String) -> Result<CookieJar, String> {
     let private_key = match EncodingKey::from_rsa_pem(JWT_PRIVATE_KEY.as_bytes()) {
         Ok(key) => key,
         Err(e) => return Err(e.to_string()),
     };
 
-    match encode(&Header::new(Algorithm::RS256), &auth_cookie, &private_key) {
+    let cookie_expiration = time::Duration::days(7);
+    match encode(
+        &Header::new(Algorithm::RS256),
+        &AuthCookie {
+            sub: email,
+            exp: (Utc::now().timestamp() + cookie_expiration.whole_seconds()) as usize,
+        },
+        &private_key,
+    ) {
         Ok(token) => {
             let cookie = Cookie::build((AUTH_COOKIE_NAME, token))
                 .path("/")
-                .max_age(time::Duration::days(7))
+                .max_age(cookie_expiration)
                 .build();
             Ok(cookies.add(cookie))
         }

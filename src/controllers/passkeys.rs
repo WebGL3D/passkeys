@@ -1,4 +1,4 @@
-use crate::cookies::{AuthCookie, authenticate};
+use crate::cookies::{authenticate, fetch};
 use crate::db::{create_challenge, insert_passkey, redeem_challenge, select_passkeys};
 use crate::env::{HOST_NAME, ORIGIN};
 use crate::webauthn::{parse_attestation_object, parse_authenticator_data};
@@ -179,6 +179,19 @@ pub async fn signup(
     Query(query): Query<HashMap<String, String>>,
     Json(request): Json<SignupRequest>,
 ) -> (CookieJar, impl IntoResponse) {
+    if fetch(cookies.clone()).is_ok() {
+        return (
+            cookies,
+            (
+                StatusCode::FORBIDDEN,
+                Json(ErrorJson {
+                    error: String::from("Authenticated user cannot signup."),
+                }),
+            )
+                .into_response(),
+        );
+    }
+
     let email = match fetch_email(query) {
         Ok(email) => email,
         Err(e) => {
@@ -300,31 +313,22 @@ pub async fn signup(
     )
     .await
     {
-        Ok(_) => {
-            match authenticate(
-                cookies.clone(),
-                AuthCookie {
-                    sub: email,
-                    exp: (Utc::now().timestamp() + (time::Duration::days(7).whole_seconds()))
-                        as usize,
-                },
-            ) {
-                Ok(c) => (c, StatusCode::CREATED.into_response()),
-                Err(err) => {
-                    println!("Failed to update cookie jar after passkey saved: {err}");
+        Ok(_) => match authenticate(cookies.clone(), email) {
+            Ok(c) => (c, StatusCode::CREATED.into_response()),
+            Err(err) => {
+                println!("Failed to update cookie jar after passkey saved: {err}");
+                (
+                    cookies,
                     (
-                        cookies,
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(ErrorJson {
-                                error: UNEXPECTED_ERROR.to_string(),
-                            }),
-                        )
-                            .into_response(),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorJson {
+                            error: UNEXPECTED_ERROR.to_string(),
+                        }),
                     )
-                }
+                        .into_response(),
+                )
             }
-        }
+        },
         Err(err) => {
             println!("Failed to save passkey to database: {err}");
             (

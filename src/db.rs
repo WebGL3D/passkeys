@@ -107,6 +107,7 @@ pub async fn redeem_challenge(id: String, email: String) -> Result<Challenge, St
     }
 }
 
+/// Inserts a passkey into the database.
 pub async fn insert_passkey(
     attestation_object: AttestationObject,
     public_key: String,
@@ -152,6 +153,22 @@ pub async fn insert_passkey(
             None => Err(String::from("No passkey was returned from insert query.")),
         },
         Err(err) => Err(format!("Failed to insert passkey into database: {err}")),
+    }
+}
+
+/// Updates the email address (hashes) stored in the passkeys table.
+pub async fn update_email(
+    original_email: String,
+    new_email: String,
+) -> Result<Vec<Passkey>, String> {
+    match db1_query::<Passkey>(
+        "PASSKEYS_UPDATE_EMAIL_HASH",
+        vec![hash_email(original_email), hash_email(new_email)],
+    )
+    .await
+    {
+        Ok(updated_passkeys) => Ok(updated_passkeys),
+        Err(err) => Err(format!("Failed to update database: {err}")),
     }
 }
 
