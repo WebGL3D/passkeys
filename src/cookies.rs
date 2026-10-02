@@ -72,7 +72,6 @@ pub fn clear(cookies: CookieJar) -> CookieJar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
 
     #[test]
     fn test_clear() {
@@ -93,10 +92,7 @@ mod tests {
             CookieJar::new()
                 .add(Cookie::new("foo", "bar"))
                 .add(Cookie::new("a", "b")),
-            AuthCookie {
-                exp: (Utc::now().timestamp() + 15) as usize,
-                sub: "hello".to_string(),
-            },
+            String::from("hello"),
         )
         .unwrap();
     }

@@ -1,5 +1,4 @@
 use crate::webauthn::AttestationObject;
-use axum::response::IntoResponse;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reqwest::Error;
 use serde::{Deserialize, de::DeserializeOwned};
@@ -7,7 +6,7 @@ use sha2::Digest;
 use uuid::Uuid;
 
 /// The passkey record from the database.
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Passkey {
     /// Maps to [PublicKeyCredential.id](https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredential/id)
     pub id: String,
@@ -29,7 +28,7 @@ pub struct Passkey {
 }
 
 /// The challenge record from the database.
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Challenge {
     /// The challenge token.
     pub id: String,
@@ -72,12 +71,7 @@ pub async fn create_challenge(email: String) -> Result<Challenge, String> {
     let id = URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes());
     match db1_query::<Challenge>("CHALLENGES_INSERT", vec![id, hash_email(email)]).await {
         Ok(challenges) => match challenges.first() {
-            Some(challenge) => Ok(Challenge {
-                // TODO: Is there a better way to do this, maybe with clone()?
-                id: challenge.id.to_string(),
-                email_hash: challenge.email_hash.to_string(),
-                expiration: challenge.expiration,
-            }),
+            Some(challenge) => Ok(challenge.clone()),
             None => Err(String::from("No challenge was returned from insert query.")),
         },
         Err(_) => Err(String::from("Failed to insert challenge into database.")),
@@ -93,12 +87,7 @@ pub async fn redeem_challenge(id: String, email: String) -> Result<Challenge, St
                     return Err(String::from("Email did not match challenge"));
                 }
 
-                Ok(Challenge {
-                    // TODO: Is there a better way to do this, maybe with clone()?
-                    id: challenge.id.to_string(),
-                    email_hash: challenge.email_hash.to_string(),
-                    expiration: challenge.expiration,
-                })
+                Ok(challenge.clone())
             }
 
             None => Err(String::from("No challenge was returned from redeem query.")),
@@ -139,17 +128,7 @@ pub async fn insert_passkey(
     .await
     {
         Ok(passkeys) => match passkeys.first() {
-            Some(passkey) => {
-                Ok(Passkey {
-                    // TODO: Is there a better way to do this, maybe with clone()?
-                    id: passkey.id.to_string(),
-                    email_hash: passkey.email_hash.to_string(),
-                    public_key: passkey.public_key.to_string(),
-                    public_key_algorithm: passkey.public_key_algorithm,
-                    sign_count: passkey.sign_count,
-                    created: passkey.created,
-                })
-            }
+            Some(passkey) => Ok(passkey.clone()),
             None => Err(String::from("No passkey was returned from insert query.")),
         },
         Err(err) => Err(format!("Failed to insert passkey into database: {err}")),
