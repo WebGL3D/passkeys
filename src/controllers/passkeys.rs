@@ -59,7 +59,7 @@ pub struct LoginMetadata {
 }
 
 #[derive(Deserialize)]
-pub struct CredentialResponse {
+pub struct CredentialCreateResponse {
     #[serde(rename = "attestationObject")]
     attestation_object: String,
 
@@ -97,7 +97,7 @@ pub struct SignupRequest {
     #[serde(rename = "rawId")]
     raw_id: String,
 
-    response: CredentialResponse,
+    response: CredentialCreateResponse,
 }
 
 /// Error JSON result.
@@ -233,7 +233,8 @@ pub async fn signup(
         );
     }
 
-    let client_data = match parse_client_data(request.response.client_data_json) {
+    let client_data = match parse_client_data(request.response.client_data_json, "webauthn.create")
+    {
         Ok(c) => c,
         Err(err) => {
             println!("Failed to parse clientDataJSON: {err}");
@@ -410,7 +411,7 @@ fn fetch_email(query: HashMap<String, String>) -> Result<String, String> {
     }
 }
 
-fn parse_client_data(client_data_json: String) -> Result<ClientData, String> {
+fn parse_client_data(client_data_json: String, expected_type: &str) -> Result<ClientData, String> {
     let client_data = match URL_SAFE_NO_PAD.decode(client_data_json) {
         Ok(json_bytes) => String::from_utf8(json_bytes),
         Err(_) => return Err(String::from("Failed base64 decode")),
@@ -422,7 +423,17 @@ fn parse_client_data(client_data_json: String) -> Result<ClientData, String> {
     };
 
     match json {
-        Ok(client_data) => Ok(client_data),
+        Ok(client_data) => {
+            if !client_data.authn_type.eq(expected_type) {
+                return Err(String::from("authn type did not match"));
+            }
+
+            if !client_data.origin.eq(ORIGIN.as_str().trim_end_matches("/")) {
+                return Err(String::from("origin did not match"));
+            }
+
+            Ok(client_data)
+        }
         Err(_) => Err(String::from("serde_json::from_str")),
     }
 }
