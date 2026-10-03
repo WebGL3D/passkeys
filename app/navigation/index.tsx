@@ -8,8 +8,8 @@ import {
   MenuItem,
   Toolbar,
 } from '@mui/material';
-import { Fragment, useState } from 'react';
-import { NavLink } from 'react-router';
+import { Fragment, useEffect, useState } from 'react';
+import { NavLink, useLocation } from 'react-router';
 import useAuthenticatedUser from '../hooks/useAuthenticatedUser';
 import { signOut } from '../services/passkeys';
 
@@ -17,6 +17,13 @@ export default function Navigation() {
   const [authenticatedUser] = useAuthenticatedUser();
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
+  const location = useLocation();
+
+  useEffect(() => {
+    // Close the menu if the authenticated user changes, or we navigate to a new page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMenuOpen(false);
+  }, [authenticatedUser, location]);
 
   return (
     <AppBar>
@@ -45,14 +52,7 @@ export default function Navigation() {
                     Settings
                   </NavLink>
                 </MenuItem>
-                <MenuItem
-                  onClick={() => {
-                    setMenuOpen(false);
-                    signOut();
-                  }}
-                >
-                  Log Out
-                </MenuItem>
+                <MenuItem onClick={signOut}>Log Out</MenuItem>
               </Menu>
             </Fragment>
           ) : (

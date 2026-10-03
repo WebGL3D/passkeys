@@ -6,8 +6,13 @@ import {
   type User,
 } from '../services/users';
 
-export default function useAuthenticatedUser(): [User | null, LoadingState] {
-  const [authenticatedUser, setAuthenticatedUser] = useState<User | null>(null);
+export default function useAuthenticatedUser(): [
+  User | null | undefined,
+  LoadingState,
+] {
+  const [authenticatedUser, setAuthenticatedUser] = useState<
+    User | null | undefined
+  >(undefined);
   const [loadingState, setLoadingState] = useState(LoadingState.Loading);
 
   const refresh = () => {

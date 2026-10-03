@@ -7,7 +7,7 @@ export default function Settings() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!authenticatedUser) {
+    if (authenticatedUser === null) {
       navigate('/login');
     }
   }, [navigate, authenticatedUser]);
