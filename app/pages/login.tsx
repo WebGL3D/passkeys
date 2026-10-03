@@ -1,7 +1,9 @@
 import { Alert, Box, Button, Collapse, TextField } from '@mui/material';
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { isAlphanumeric, isEmail, isEmpty } from 'validator';
 import { initiateLogin, signup } from '../services/passkeys';
+import useAuthenticatedUser from '../hooks/useAuthenticatedUser';
 
 const enterKey = 'Enter';
 
@@ -43,6 +45,8 @@ export default function Login() {
   >([]);
   const [origin, setOrigin] = useState<string>('');
   const displayNameRef = useRef<HTMLInputElement>(null);
+  const [authenticatedUser] = useAuthenticatedUser();
+  const navigate = useNavigate();
 
   const clearChallenge = () => {
     setChallenge('');
@@ -52,6 +56,12 @@ export default function Login() {
     setPubKeyCredParams([]);
     setOrigin('');
   };
+
+  useEffect(() => {
+    if (authenticatedUser) {
+      navigate('/');
+    }
+  }, [navigate, authenticatedUser]);
 
   useEffect(() => {
     if (authenticationTimeout < 1 || !challenge) {
@@ -127,6 +137,7 @@ export default function Login() {
         const request = PublicKeyCredential.parseRequestOptionsFromJSON({
           rpId: response.origin,
           challenge: response.challenge,
+          userVerification: 'required',
           allowCredentials: response.availablePublicKeys.map((keyId) => {
             return {
               id: keyId,
@@ -134,11 +145,11 @@ export default function Login() {
             };
           }),
         });
-        const credentials = await navigator.credentials.get({
+        const credentials = (await navigator.credentials.get({
           mediation: 'required',
           publicKey: request,
-        });
         console.log('Credentials', credentials);
+        })) as PublicKeyCredential;
       } else {
         // User has not signed up yet, let's prompt them to input a display name.
         setRequestDisplayName(true);
@@ -177,13 +188,16 @@ export default function Login() {
         attestation: 'none',
         timeout: authenticationTimeout,
       });
+
       const credentials = (await navigator.credentials.create({
         publicKey: request,
       })) as PublicKeyCredential;
 
       if (credentials) {
         await signup(email, credentials);
-        // TODO: Sign in the user
+      } else {
+        console.warn('navigator.credentials.create returned null?');
+        clearChallenge();
       }
     } catch (e) {
       console.error('Failed to create passkey', e);

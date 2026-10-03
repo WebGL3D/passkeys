@@ -1,8 +1,12 @@
 import { CircularProgress } from '@mui/material';
+import { BrowserRouter, Route, Routes } from 'react-router';
 import { LoadingState } from '../constants';
 import useAuthenticatedUser from '../hooks/useAuthenticatedUser';
+import Navigation from '../navigation';
 import Error from './error';
+import Home from './home';
 import Login from './login';
+import Settings from './settings';
 import Unsupported from './unsupported';
 
 export default function AppContent() {
@@ -20,5 +24,14 @@ export default function AppContent() {
     return <CircularProgress />;
   }
 
-  return <Login />;
+  return (
+    <BrowserRouter>
+      <Navigation />
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/settings" element={<Settings />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }

@@ -1,3 +1,4 @@
+import { AUTH_COOKIE } from '../constants';
 import { clearCache } from './users';
 
 type InitiateLoginResponse = {
@@ -78,5 +79,17 @@ export async function signup(
     return Promise.reject(`Failed to register passkey: ${response.status}`);
   }
 
+  clearCache();
+}
+
+export async function signOut(): Promise<void> {
+  // There's no state on the server side about the session, so just deleting the cookie is enough.
+  if (!window.cookieStore) {
+    return Promise.reject(
+      'Browser does not support clearing cookies directly.',
+    );
+  }
+
+  await cookieStore.delete(AUTH_COOKIE);
   clearCache();
 }
