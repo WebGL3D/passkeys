@@ -10,6 +10,9 @@ struct User {
     /// The email address of the user.
     #[serde(rename = "emailAddress")]
     email_address: String,
+
+    /// The user's avatar icon/image URL.
+    avatar: String,
 }
 
 #[derive(Deserialize)]
@@ -22,10 +25,17 @@ pub struct UpdateEmailRequest {
 /// Fetches the currently authenticated user.
 pub async fn authenticated_user(cookies: CookieJar) -> impl IntoResponse {
     match fetch(cookies) {
-        Ok(user) => Json(User {
-            email_address: user.sub,
-        })
-        .into_response(),
+        Ok(user) => {
+            let gravatar_hash = md5::compute(user.sub.to_lowercase());
+            Json(User {
+                email_address: user.sub,
+                avatar: format!(
+                    "https://www.gravatar.com/avatar/{:x}?size=150",
+                    gravatar_hash
+                ),
+            })
+            .into_response()
+        }
         Err(_) => StatusCode::UNAUTHORIZED.into_response(),
     }
 }

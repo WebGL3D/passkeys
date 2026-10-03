@@ -1,3 +1,5 @@
+import { clearCache } from './users';
+
 type InitiateLoginResponse = {
   // The user ID to create the passkey with.
   userId: string;
@@ -25,6 +27,9 @@ export async function initiateLogin(
     `/api/v1/passkeys/initiate-login?${new URLSearchParams({
       email,
     })}`,
+    {
+      credentials: 'include',
+    },
   );
 
   if (!response.ok) {
@@ -60,6 +65,7 @@ export async function signup(
       email,
     })}`,
     {
+      credentials: 'include',
       method: 'POST',
       body: JSON.stringify(publicKey.toJSON()),
       headers: {
@@ -71,4 +77,6 @@ export async function signup(
   if (!response.ok) {
     return Promise.reject(`Failed to register passkey: ${response.status}`);
   }
+
+  clearCache();
 }
