@@ -1,7 +1,9 @@
 use crate::cookies::{authenticate, fetch};
 use crate::db::{create_challenge, insert_passkey, redeem_challenge, select_passkeys};
 use crate::env::{HOST_NAME, ORIGIN};
-use crate::webauthn::{parse_attestation_object, parse_authenticator_data};
+use crate::webauthn::{
+    parse_attestation_object, parse_authenticator_data, parse_client_data, verify_signature,
+};
 use axum::{
     Json,
     extract::Query,
@@ -76,28 +78,33 @@ pub struct CredentialCreateResponse {
     public_key_algorithm: i32,
 }
 
-/// Maps to [AuthenticatorResponse.clientDataJSON](https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorResponse/clientDataJSON)
-#[derive(Serialize, Deserialize)]
-pub struct ClientData {
-    /// `webauthn.create` OR `webauthn.get`
-    #[serde(rename = "type")]
-    authn_type: String,
+#[derive(Deserialize)]
+pub struct CredentialFetchResponse {
+    #[serde(rename = "authenticatorData")]
+    authenticator_data: String,
 
-    /// The challenge token.
-    challenge: String,
+    #[serde(rename = "clientDataJSON")]
+    client_data_json: String,
 
-    /// The origin the passkey was created on.
-    origin: String,
+    /// The verification signature.
+    signature: String,
+
+    /// The ID of the user that they were signed up with.
+    #[serde(rename = "userHandle")]
+    user_id: String,
 }
 
 #[derive(Deserialize)]
 pub struct SignupRequest {
+    response: CredentialCreateResponse,
+}
+
+#[derive(Deserialize)]
+pub struct SignInRequest {
+    /// The ID of the passkey used for the signature.
     id: String,
 
-    #[serde(rename = "rawId")]
-    raw_id: String,
-
-    response: CredentialCreateResponse,
+    response: CredentialFetchResponse,
 }
 
 /// Error JSON result.
@@ -130,12 +137,8 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
 
     let passkeys: Vec<String> = match select_passkeys(email).await {
         Ok(response) => response.into_iter().map(|p| p.id).collect(),
-        Err(e) => {
-            println!(
-                "Failed to send query back to container: {} - {}",
-                e.to_string(),
-                e.source().unwrap()
-            );
+        Err(err) => {
+            println!("Failed to select passkeys from email: {err}");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorJson {
@@ -377,6 +380,154 @@ pub async fn signup(
     }
 }
 
+/// Authenticates a user with a previously registered passkey.
+pub async fn signin(
+    cookies: CookieJar,
+    Query(query): Query<HashMap<String, String>>,
+    Json(request): Json<SignInRequest>,
+) -> (CookieJar, impl IntoResponse) {
+    let email = match fetch_email(query) {
+        Ok(e) => e,
+        Err(e) => {
+            return (
+                cookies,
+                (StatusCode::BAD_REQUEST, Json(ErrorJson { error: e })).into_response(),
+            );
+        }
+    };
+
+    let client_data = match parse_client_data(request.response.client_data_json, "webauthn.get") {
+        Ok(c) => c,
+        Err(err) => {
+            println!("Failed to parse clientDataJSON: {err}");
+            return (
+                cookies,
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorJson {
+                        error: String::from("Invalid clientDataJSON"),
+                    }),
+                )
+                    .into_response(),
+            );
+        }
+    };
+
+    let challenge = match redeem_challenge(client_data.challenge.clone(), email.clone()).await {
+        Ok(c) => c,
+        Err(err) => {
+            println!("Failed to redeem challenge: {err}");
+            return (
+                cookies,
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorJson {
+                        error: String::from("Invalid challenge token"),
+                    }),
+                )
+                    .into_response(),
+            );
+        }
+    };
+
+    let authenticator_data = match parse_authenticator_data(request.response.authenticator_data) {
+        Ok(a) => a,
+        Err(err) => {
+            println!("Failed to parse authenticatorData: {err}");
+            return (
+                cookies,
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorJson {
+                        error: String::from("Invalid authenticatorData"),
+                    }),
+                )
+                    .into_response(),
+            );
+        }
+    };
+
+    let passkey = match select_passkeys(email.to_string()).await {
+        Ok(passkeys) => match passkeys.iter().find(|p| p.id == request.id) {
+            Some(p) => p.clone(),
+            None => {
+                println!("User with this email does not have passkey that was used");
+                return (
+                    cookies,
+                    (
+                        StatusCode::FORBIDDEN,
+                        Json(ErrorJson {
+                            error: String::from("Invalid passkey"),
+                        }),
+                    )
+                        .into_response(),
+                );
+            }
+        },
+        Err(err) => {
+            println!("Failed to select passkeys for email: {err}");
+            return (
+                cookies,
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorJson {
+                        error: UNEXPECTED_ERROR.to_string(),
+                    }),
+                )
+                    .into_response(),
+            );
+        }
+    };
+
+    match verify_signature(
+        passkey,
+        &client_data,
+        &authenticator_data,
+        &request.response.signature,
+    ) {
+        Ok(_) => {}
+        Err(err) => {
+            println!("Failed to verify signature: {err}");
+            return (
+                cookies,
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorJson {
+                        error: UNEXPECTED_ERROR.to_string(),
+                    }),
+                )
+                    .into_response(),
+            );
+        }
+    };
+
+    match authenticate(cookies.clone(), email) {
+        Ok(c) => (
+            c,
+            (
+                StatusCode::OK,
+                Json(ErrorJson {
+                    error: UNEXPECTED_ERROR.to_string(),
+                }),
+            )
+                .into_response(),
+        ),
+        Err(err) => {
+            println!("Failed to authenticate: {err}");
+            (
+                cookies,
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorJson {
+                        error: UNEXPECTED_ERROR.to_string(),
+                    }),
+                )
+                    .into_response(),
+            )
+        }
+    }
+}
+
 fn parse_public_key(base64: String, _algorithm: i32) -> Result<Pem, Response> {
     // TODO: Figure out what to do with the public key algorithm
     match URL_SAFE_NO_PAD.decode(base64) {
@@ -408,33 +559,6 @@ fn fetch_email(query: HashMap<String, String>) -> Result<String, String> {
     match email {
         Ok(email) => Ok(email.email()),
         Err(_) => Err(String::from("Invalid email")),
-    }
-}
-
-fn parse_client_data(client_data_json: String, expected_type: &str) -> Result<ClientData, String> {
-    let client_data = match URL_SAFE_NO_PAD.decode(client_data_json) {
-        Ok(json_bytes) => String::from_utf8(json_bytes),
-        Err(_) => return Err(String::from("Failed base64 decode")),
-    };
-
-    let json = match client_data {
-        Ok(json) => serde_json::from_str::<ClientData>(json.as_str()),
-        Err(_) => return Err(String::from("Failed String::from_utf8")),
-    };
-
-    match json {
-        Ok(client_data) => {
-            if !client_data.authn_type.eq(expected_type) {
-                return Err(String::from("authn type did not match"));
-            }
-
-            if !client_data.origin.eq(ORIGIN.as_str().trim_end_matches("/")) {
-                return Err(String::from("origin did not match"));
-            }
-
-            Ok(client_data)
-        }
-        Err(_) => Err(String::from("serde_json::from_str")),
     }
 }
 

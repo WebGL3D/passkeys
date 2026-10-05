@@ -46,7 +46,13 @@ pub async fn db1_query<T: DeserializeOwned>(
     args: Vec<String>,
 ) -> Result<Vec<T>, reqwest::Error> {
     let query_string = if args.len() > 0 {
-        format!("&arg={}", args.join("&arg="))
+        format!(
+            "&arg={}",
+            args.iter()
+                .map(|a| urlencoding::encode(a).to_string())
+                .collect::<Vec<String>>()
+                .join("&arg=")
+        )
     } else {
         String::from("")
     };

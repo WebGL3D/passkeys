@@ -82,6 +82,29 @@ export async function signup(
   clearCache();
 }
 
+export async function signin(email: string, publicKey: PublicKeyCredential) {
+  console.log('Signin', publicKey);
+  const response = await fetch(
+    `/api/v1/passkeys/signin?${new URLSearchParams({
+      email,
+    })}`,
+    {
+      credentials: 'include',
+      method: 'POST',
+      body: JSON.stringify(publicKey.toJSON()),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    },
+  );
+
+  if (!response.ok) {
+    return Promise.reject(`Failed to sign in with passkey: ${response.status}`);
+  }
+
+  clearCache();
+}
+
 export async function signOut(): Promise<void> {
   // There's no state on the server side about the session, so just deleting the cookie is enough.
   if (!window.cookieStore) {

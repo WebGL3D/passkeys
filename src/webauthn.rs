@@ -1,9 +1,13 @@
-use crate::env::HOST_NAME;
+use crate::db::Passkey;
+use crate::env::{HOST_NAME, ORIGIN};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bitflags::bitflags;
-use serde::Deserialize;
-use sha2::Digest;
+use p256::ecdsa::signature::Verifier;
+use p256::pkcs8::DecodePublicKey;
+use serde::{Deserialize, Serialize};
+use sha2::digest::Output;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 bitflags! {
@@ -35,6 +39,9 @@ bitflags! {
 
 /// Parsed [authenticatorData](https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API/Authenticator_data)
 pub struct AuthenticatorData {
+    /// The decoded bytes of the authenticator data.
+    pub raw_bytes: Vec<u8>,
+
     /// The sha256 hashed bytes of the rpId
     ///
     /// Verified before being returned by `parse_authenticator_data`
@@ -82,6 +89,24 @@ pub struct AttestationObject {
 
     /// The authenticator data, parsed from the attestation object.
     pub authenticator_data: AuthenticatorData,
+}
+
+/// Maps to [AuthenticatorResponse.clientDataJSON](https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorResponse/clientDataJSON)
+#[derive(Serialize, Deserialize)]
+pub struct ClientData {
+    /// A SHA256 hash of the clientDataJSON, for signature verification.
+    #[serde(skip_serializing, skip_deserializing)]
+    pub hash: Option<Output<Sha256>>,
+
+    /// `webauthn.create` OR `webauthn.get`
+    #[serde(rename = "type")]
+    pub authn_type: String,
+
+    /// The challenge token.
+    pub challenge: String,
+
+    /// The origin the passkey was created on.
+    pub origin: String,
 }
 
 /// The (raw) parsed [attestationObject](https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAttestationResponse/attestationObject).
@@ -168,6 +193,7 @@ pub fn parse_authenticator_data(authenticator_data: String) -> Result<Authentica
     }
 
     Ok(AuthenticatorData {
+        raw_bytes: parsed_data,
         rp_id_hash,
         flags,
         sign_count,
@@ -202,4 +228,91 @@ pub fn parse_attestation_object(attestation_object: String) -> Result<Attestatio
         format: attestation_map.fmt,
         authenticator_data,
     })
+}
+
+/// Parses [clientDataJSON](https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorResponse/clientDataJSON)
+pub fn parse_client_data(
+    client_data_json: String,
+    expected_type: &str,
+) -> Result<ClientData, String> {
+    let json_bytes = match URL_SAFE_NO_PAD.decode(client_data_json) {
+        Ok(json_bytes) => json_bytes,
+        Err(_) => return Err(String::from("Failed base64 decode")),
+    };
+
+    let json = match String::from_utf8(json_bytes.clone()) {
+        Ok(json) => serde_json::from_str::<ClientData>(json.as_str()),
+        Err(_) => return Err(String::from("Failed String::from_utf8")),
+    };
+
+    match json {
+        Ok(mut client_data) => {
+            if client_data.authn_type == "webauthn.get" {
+                client_data.hash = Some(Sha256::digest(json_bytes));
+            } else {
+                client_data.hash = None;
+            }
+
+            if !client_data.authn_type.eq(expected_type) {
+                return Err(String::from("authn type did not match"));
+            }
+
+            if !client_data.origin.eq(ORIGIN.as_str().trim_end_matches("/")) {
+                return Err(String::from("origin did not match"));
+            }
+
+            Ok(client_data)
+        }
+        Err(_) => Err(String::from("serde_json::from_str")),
+    }
+}
+
+pub fn verify_signature(
+    passkey: Passkey,
+    client_data: &ClientData,
+    authenticator_data: &AuthenticatorData,
+    signature: &str,
+) -> Result<bool, String> {
+    let signature_bytes = match URL_SAFE_NO_PAD.decode(signature) {
+        Ok(signature_bytes) => signature_bytes,
+        Err(_) => return Err(String::from("Failed to decode signature")),
+    };
+
+    let verification_signature = match client_data.hash {
+        Some(hash) => {
+            let mut result = Vec::with_capacity(hash.len() + authenticator_data.raw_bytes.len());
+            result.extend_from_slice(&authenticator_data.raw_bytes);
+            result.extend_from_slice(&hash);
+            result
+        }
+        None => return Err(String::from("No clientDataJSON hash to verify.")),
+    };
+
+    match passkey.public_key_algorithm {
+        -7 => {
+            let signed_data_signature = match p256::ecdsa::Signature::from_der(&signature_bytes) {
+                Ok(signature) => signature,
+                Err(err) => {
+                    return Err(format!("Failed to parse verification signature: {err}"));
+                }
+            };
+
+            let public_key =
+                match p256::ecdsa::VerifyingKey::from_public_key_pem(&passkey.public_key) {
+                    Ok(public_key) => public_key,
+                    Err(err) => {
+                        return Err(format!(
+                            "Failed to parse public key PEM: {err}\n{}",
+                            passkey.public_key
+                        ));
+                    }
+                };
+
+            match public_key.verify(&verification_signature, &signed_data_signature) {
+                Ok(_) => Ok(true),
+                Err(err) => Err(format!("Failed to verify signature: {err}")),
+            }
+        }
+        _ => Err(String::from("Unsupported public key algorithm")),
+    }
 }

@@ -2,8 +2,8 @@ import { Alert, Box, Button, Collapse, TextField } from '@mui/material';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { isAlphanumeric, isEmail, isEmpty } from 'validator';
-import { initiateLogin, signup } from '../services/passkeys';
 import useAuthenticatedUser from '../hooks/useAuthenticatedUser';
+import { initiateLogin, signin, signup } from '../services/passkeys';
 
 const enterKey = 'Enter';
 
@@ -148,8 +148,8 @@ export default function Login() {
         const credentials = (await navigator.credentials.get({
           mediation: 'required',
           publicKey: request,
-        console.log('Credentials', credentials);
         })) as PublicKeyCredential;
+        await signin(email, credentials);
       } else {
         // User has not signed up yet, let's prompt them to input a display name.
         setRequestDisplayName(true);
