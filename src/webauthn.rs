@@ -193,19 +193,19 @@ pub fn parse_authenticator_data(authenticator_data: String) -> Result<Authentica
                 }
             };
 
-        credential_public_key = Some(match COSEKey::try_from(&credential_value) {
+        let encoded_key = match credential_value {
+            serde_cbor_2::Value::Bytes(bytes) => URL_SAFE_NO_PAD.encode(bytes),
+            _ => return Err(String::from("Failed to decode COSE key")),
+        };
+
+        match parse_cose_key(encoded_key.to_string()) {
             Ok(cose_key) => {
                 credential_public_key_algorithm = Some(cose_key.type_ as i32);
-                match serde_cbor_2::to_vec(&cose_key) {
-                    Ok(cose_key) => URL_SAFE_NO_PAD.encode(cose_key),
-                    Err(err) => return Err(format!("Failed to serialize COSE key: {err}")),
-                }
             }
-            Err(err) => {
-                return Err(format!("Failed to parse COSE key: {err}"));
-            }
-        });
-        println!("credential public key: {:?}", credential_public_key);
+            Err(err) => return Err(format!("Failed to parse COSE key: {err}")),
+        };
+
+        credential_public_key = Some(encoded_key);
     }
 
     Ok(AuthenticatorData {
