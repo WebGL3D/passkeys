@@ -1,20 +1,16 @@
 use crate::cookies::{authenticate, fetch};
-use crate::db::{create_challenge, insert_passkey, redeem_challenge, select_passkeys};
-use crate::env::{HOST_NAME, ORIGIN};
+use crate::db::{
+    create_challenge, insert_passkey, redeem_challenge, select_passkeys, update_sign_count,
+};
+use crate::env::HOST_NAME;
 use crate::webauthn::{
     parse_attestation_object, parse_authenticator_data, parse_client_data, verify_signature,
 };
-use axum::{
-    Json,
-    extract::Query,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::Query, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use email_address::{EmailAddress, Options};
-use pem::{Pem, encode};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, error::Error};
 use uuid::Uuid;
@@ -254,7 +250,8 @@ pub async fn signup(
         }
     };
 
-    let challenge = match redeem_challenge(client_data.challenge.clone(), email.clone()).await {
+    // Verifies that the challenge is valid.
+    match redeem_challenge(client_data.challenge.clone(), email.clone()).await {
         Ok(c) => c,
         Err(err) => {
             println!("Failed to redeem challenge: {err}");
@@ -271,7 +268,8 @@ pub async fn signup(
         }
     };
 
-    let authenticator_data = match parse_authenticator_data(request.response.authenticator_data) {
+    // Verifies the rpIdHash
+    match parse_authenticator_data(request.response.authenticator_data) {
         Ok(a) => a,
         Err(err) => {
             println!("Failed to parse authenticatorData: {err}");
@@ -287,31 +285,6 @@ pub async fn signup(
             );
         }
     };
-
-    println!("challenge: {}", challenge.id);
-    println!("email: {}", email);
-    println!("Host: {}", ORIGIN.as_str());
-    println!("clientDataJSON: {:?}", serde_json::to_string(&client_data));
-    println!(
-        "flags ({}): {}",
-        authenticator_data.flags.iter().count(),
-        authenticator_data
-            .flags
-            .iter()
-            .map(|f| format!("{:?}", f))
-            .collect::<Vec<String>>()
-            .join(", ")
-    );
-    println!("sign_count: {}", authenticator_data.sign_count);
-    println!(
-        "authenticator_attestation_guid: {:?}",
-        authenticator_data.authenticator_attestation_guid
-    );
-    println!("credential_id: {:?}", authenticator_data.credential_id);
-    println!(
-        "credential_public_key: {:?}",
-        authenticator_data.credential_public_key
-    );
 
     let attestation_object = match parse_attestation_object(request.response.attestation_object) {
         Ok(a) => a,
@@ -329,17 +302,7 @@ pub async fn signup(
             );
         }
     };
-    println!("attestationObject.fmt: {}", attestation_object.format);
 
-    let public_key = match parse_public_key(
-        request.response.public_key,
-        request.response.public_key_algorithm,
-    ) {
-        Ok(public_key) => encode(&public_key),
-        Err(res) => return (cookies, res),
-    };
-
-    println!("public_key: {public_key}");
     match insert_passkey(attestation_object, email.to_string()).await {
         Ok(_) => match authenticate(cookies.clone(), email) {
             Ok(c) => (c, StatusCode::CREATED.into_response()),
@@ -406,7 +369,8 @@ pub async fn signin(
         }
     };
 
-    let challenge = match redeem_challenge(client_data.challenge.clone(), email.clone()).await {
+    // Verifies the challenge.
+    match redeem_challenge(client_data.challenge.clone(), email.to_string()).await {
         Ok(c) => c,
         Err(err) => {
             println!("Failed to redeem challenge: {err}");
@@ -472,6 +436,36 @@ pub async fn signin(
         }
     };
 
+    match update_sign_count(passkey.id.to_string(), authenticator_data.sign_count).await {
+        Ok(success) => {
+            if !success {
+                return (
+                    cookies,
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(ErrorJson {
+                            error: String::from("Invalid authenticatorData"),
+                        }),
+                    )
+                        .into_response(),
+                );
+            }
+        }
+        Err(err) => {
+            println!("Failed to update passkey sign count: {err}");
+            return (
+                cookies,
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorJson {
+                        error: UNEXPECTED_ERROR.to_string(),
+                    }),
+                )
+                    .into_response(),
+            );
+        }
+    }
+
     match verify_signature(
         passkey,
         &client_data,
@@ -518,21 +512,6 @@ pub async fn signin(
                     .into_response(),
             )
         }
-    }
-}
-
-fn parse_public_key(base64: String, _algorithm: i32) -> Result<Pem, Response> {
-    // TODO: Figure out what to do with the public key algorithm
-    match URL_SAFE_NO_PAD.decode(base64) {
-        // TODO: Verify the "PUBLIC KEY" tag is what we need here
-        Ok(bytes) => Ok(Pem::new("PUBLIC KEY", bytes)),
-        Err(_) => Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorJson {
-                error: String::from("Public key could not be parsed"),
-            }),
-        )
-            .into_response()),
     }
 }
 

@@ -144,6 +144,25 @@ pub async fn insert_passkey(
     }
 }
 
+/// Updates the sign count for a passkey.
+pub async fn update_sign_count(passkey_id: String, sign_count: u32) -> Result<bool, String> {
+    if sign_count == 0 {
+        // Sign count will be explicitly set to zero when the authenticator doesn't support it.
+        // https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API/Authenticator_data#signcount
+        return Ok(true);
+    }
+
+    match db1_query::<Passkey>(
+        "PASSKEYS_UPDATE_SIGN_COUNT",
+        vec![sign_count.to_string(), passkey_id, sign_count.to_string()],
+    )
+    .await
+    {
+        Ok(passkeys) => Ok(!passkeys.is_empty()),
+        Err(err) => Err(format!("Failed to update passkey sign count: {err}")),
+    }
+}
+
 /// Updates the email address (hashes) stored in the passkeys table.
 pub async fn update_email(
     original_email: String,

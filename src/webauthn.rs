@@ -1,11 +1,9 @@
 use crate::db::Passkey;
 use crate::env::{HOST_NAME, ORIGIN};
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
-use sha2::digest::Output;
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, digest::Output};
 use uuid::Uuid;
 use webauthn_rs_core::proto::COSEKey;
 
@@ -141,7 +139,7 @@ pub fn parse_authenticator_data(authenticator_data: String) -> Result<Authentica
         Err(_) => return Err(String::from("Failed to parse rpIdHash")),
     };
 
-    if !rp_id_hash.eq(sha2::Sha256::digest(HOST_NAME.to_string()).as_slice()) {
+    if !rp_id_hash.eq(Sha256::digest(HOST_NAME.to_string()).as_slice()) {
         return Err(String::from("rpIdHash did not match expected value"));
     }
 
@@ -289,6 +287,7 @@ pub fn parse_client_data(
     }
 }
 
+/// Verifies the signature for a passkey.
 pub fn verify_signature(
     passkey: Passkey,
     client_data: &ClientData,
@@ -327,6 +326,7 @@ pub fn verify_signature(
     }
 }
 
+/// Parses the `COSEKey` from a base64 (url) encoded string.
 fn parse_cose_key(encoded_key: String) -> Result<COSEKey, String> {
     match URL_SAFE_NO_PAD.decode(encoded_key) {
         Ok(public_key) => {
