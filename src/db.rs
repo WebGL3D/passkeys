@@ -105,8 +105,6 @@ pub async fn redeem_challenge(id: String, email: String) -> Result<Challenge, St
 /// Inserts a passkey into the database.
 pub async fn insert_passkey(
     attestation_object: AttestationObject,
-    public_key: String,
-    public_key_algorithm: i32,
     email: String,
 ) -> Result<Passkey, String> {
     let credential_id = match attestation_object.authenticator_data.credential_id {
@@ -114,21 +112,26 @@ pub async fn insert_passkey(
         None => return Err(String::from("Invalid credential ID")),
     };
 
-    // TODO: Read from here, instead of having the value passed in.
-    /*
     let credential_public_key = match attestation_object.authenticator_data.credential_public_key {
         Some(k) => k,
         None => return Err(String::from("Invalid credential public key")),
     };
-    // */
+
+    let credential_algorithm = match attestation_object
+        .authenticator_data
+        .credential_public_key_algorithm
+    {
+        Some(a) => a,
+        None => return Err(String::from("Invalid credential public key algorithm")),
+    };
 
     match db1_query::<Passkey>(
         "PASSKEYS_INSERT",
         vec![
             credential_id,
             hash_email(email),
-            public_key,
-            public_key_algorithm.to_string(),
+            credential_public_key,
+            credential_algorithm.to_string(),
         ],
     )
     .await

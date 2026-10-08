@@ -340,14 +340,7 @@ pub async fn signup(
     };
 
     println!("public_key: {public_key}");
-    match insert_passkey(
-        attestation_object,
-        public_key,
-        request.response.public_key_algorithm,
-        email.to_string(),
-    )
-    .await
-    {
+    match insert_passkey(attestation_object, email.to_string()).await {
         Ok(_) => match authenticate(cookies.clone(), email) {
             Ok(c) => (c, StatusCode::CREATED.into_response()),
             Err(err) => {

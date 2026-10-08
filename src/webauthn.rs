@@ -3,12 +3,11 @@ use crate::env::{HOST_NAME, ORIGIN};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bitflags::bitflags;
-use p256::ecdsa::signature::Verifier;
-use p256::pkcs8::DecodePublicKey;
 use serde::{Deserialize, Serialize};
 use sha2::digest::Output;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
+use webauthn_rs_core::proto::COSEKey;
 
 bitflags! {
     #[derive(Debug)]
@@ -64,8 +63,13 @@ pub struct AuthenticatorData {
     /// Encoded as Base64, URL safe, no padding.
     pub credential_id: Option<String>,
 
-    /// TODO: This property is not set, yet.
+    /// The base64 (url) encoded public key credential.
+    ///
+    /// This can be parsed into a `COSEKey`.
     pub credential_public_key: Option<String>,
+
+    /// The algorithm used in the public key credential.
+    pub credential_public_key_algorithm: Option<i32>,
 }
 
 /// TODO: This is missing the attestation statement (attStmt).
@@ -113,12 +117,12 @@ pub struct ClientData {
 #[derive(Debug, Deserialize)]
 struct InternalAttestationObject {
     #[serde(rename = "authData")]
-    auth_data: Vec<u8>,
+    auth_data: serde_cbor_2::Value,
 
     fmt: String,
 
     #[serde(rename = "attStmt")]
-    att_stmt: ciborium::Value,
+    att_stmt: serde_cbor_2::Value,
 }
 
 /// Parses [authenticatorData](https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API/Authenticator_data)
@@ -154,6 +158,7 @@ pub fn parse_authenticator_data(authenticator_data: String) -> Result<Authentica
     let mut authenticator_attestation_guid: Option<Uuid> = None;
     let mut credential_id: Option<String> = None;
     let mut credential_public_key: Option<String> = None;
+    let mut credential_public_key_algorithm: Option<i32> = None;
 
     if flags.contains(AuthenticatorFlags::ATTESTED_CREDENTIAL_DATA_PRESENT) {
         let credential_id_start = 55;
@@ -180,16 +185,29 @@ pub fn parse_authenticator_data(authenticator_data: String) -> Result<Authentica
             Some(URL_SAFE_NO_PAD.encode(&parsed_data[credential_id_start..credential_id_end]));
         println!("credential_id: {:?}", credential_id);
 
-        // TODO: Figure out what to do with this
-        let foo: ciborium::Value = match ciborium::from_reader(&parsed_data[credential_id_end..]) {
-            Ok(reader) => reader,
-            Err(err) => {
-                return Err(format!(
-                    "Failed to parse (attested) credentials public key: {err}"
-                ));
+        let credential_value: serde_cbor_2::Value =
+            match serde_cbor_2::from_reader(&parsed_data[credential_id_end..]) {
+                Ok(reader) => reader,
+                Err(err) => {
+                    return Err(format!(
+                        "Failed to parse (attested) credentials public key: {err}"
+                    ));
+                }
+            };
+
+        credential_public_key = Some(match COSEKey::try_from(&credential_value) {
+            Ok(cose_key) => {
+                credential_public_key_algorithm = Some(cose_key.type_ as i32);
+                match serde_cbor_2::to_vec(&cose_key) {
+                    Ok(cose_key) => URL_SAFE_NO_PAD.encode(cose_key),
+                    Err(err) => return Err(format!("Failed to serialize COSE key: {err}")),
+                }
             }
-        };
-        println!("credential public key: {:?}", foo);
+            Err(err) => {
+                return Err(format!("Failed to parse COSE key: {err}"));
+            }
+        });
+        println!("credential public key: {:?}", credential_public_key);
     }
 
     Ok(AuthenticatorData {
@@ -200,6 +218,7 @@ pub fn parse_authenticator_data(authenticator_data: String) -> Result<Authentica
         authenticator_attestation_guid,
         credential_id,
         credential_public_key,
+        credential_public_key_algorithm,
     })
 }
 
@@ -207,7 +226,7 @@ pub fn parse_authenticator_data(authenticator_data: String) -> Result<Authentica
 pub fn parse_attestation_object(attestation_object: String) -> Result<AttestationObject, String> {
     let parsed_data = match URL_SAFE_NO_PAD.decode(attestation_object) {
         Ok(parsed_data) => {
-            ciborium::from_reader::<InternalAttestationObject, &[u8]>(parsed_data.as_slice())
+            serde_cbor_2::from_reader::<InternalAttestationObject, &[u8]>(parsed_data.as_slice())
         }
         Err(err) => return Err(format!("Failed to decode attestation object: {err}")),
     };
@@ -217,16 +236,19 @@ pub fn parse_attestation_object(attestation_object: String) -> Result<Attestatio
         Err(err) => return Err(format!("Failed to parse attestation object: {err}")),
     };
 
-    let authenticator_data = match parse_authenticator_data(
-        URL_SAFE_NO_PAD.encode(attestation_map.auth_data.as_slice()),
-    ) {
-        Ok(a) => a,
-        Err(err) => return Err(format!("Failed to decode authData: {err}")),
+    let authenticator_data = match attestation_map.auth_data {
+        serde_cbor_2::Value::Bytes(auth_data) => {
+            parse_authenticator_data(URL_SAFE_NO_PAD.encode(auth_data.as_slice()))
+        }
+        _ => return Err(String::from("Failed to translate attestation authData")),
     };
 
     Ok(AttestationObject {
         format: attestation_map.fmt,
-        authenticator_data,
+        authenticator_data: match authenticator_data {
+            Ok(a) => a,
+            Err(err) => return Err(format!("Failed to decode authData: {err}")),
+        },
     })
 }
 
@@ -278,7 +300,7 @@ pub fn verify_signature(
         Err(_) => return Err(String::from("Failed to decode signature")),
     };
 
-    let verification_signature = match client_data.hash {
+    let verification_data = match client_data.hash {
         Some(hash) => {
             let mut result = Vec::with_capacity(hash.len() + authenticator_data.raw_bytes.len());
             result.extend_from_slice(&authenticator_data.raw_bytes);
@@ -288,31 +310,37 @@ pub fn verify_signature(
         None => return Err(String::from("No clientDataJSON hash to verify.")),
     };
 
-    match passkey.public_key_algorithm {
-        -7 => {
-            let signed_data_signature = match p256::ecdsa::Signature::from_der(&signature_bytes) {
-                Ok(signature) => signature,
-                Err(err) => {
-                    return Err(format!("Failed to parse verification signature: {err}"));
-                }
-            };
+    let public_key = match parse_cose_key(passkey.public_key) {
+        Ok(public_key) => public_key,
+        Err(err) => return Err(err),
+    };
 
-            let public_key =
-                match p256::ecdsa::VerifyingKey::from_public_key_pem(&passkey.public_key) {
-                    Ok(public_key) => public_key,
-                    Err(err) => {
-                        return Err(format!(
-                            "Failed to parse public key PEM: {err}\n{}",
-                            passkey.public_key
-                        ));
-                    }
-                };
-
-            match public_key.verify(&verification_signature, &signed_data_signature) {
-                Ok(_) => Ok(true),
-                Err(err) => Err(format!("Failed to verify signature: {err}")),
+    match public_key.verify_signature(&signature_bytes, &verification_data) {
+        Ok(success) => {
+            if success {
+                Ok(true)
+            } else {
+                Err(String::from("Signature verification failed"))
             }
         }
-        _ => Err(String::from("Unsupported public key algorithm")),
+        Err(err) => Err(format!("Failed to verify signature: {err}")),
+    }
+}
+
+fn parse_cose_key(encoded_key: String) -> Result<COSEKey, String> {
+    match URL_SAFE_NO_PAD.decode(encoded_key) {
+        Ok(public_key) => {
+            let cose_key: serde_cbor_2::Value =
+                match serde_cbor_2::from_reader(public_key.as_slice()) {
+                    Ok(cose_key) => cose_key,
+                    Err(err) => return Err(format!("Failed to parse encoded COSE key: {err}")),
+                };
+
+            match COSEKey::try_from(&cose_key) {
+                Ok(cose_key) => Ok(cose_key),
+                Err(err) => Err(format!("Failed to translate COSE key: {err}")),
+            }
+        }
+        Err(err) => Err(format!("Failed to parse public key: {err}")),
     }
 }
