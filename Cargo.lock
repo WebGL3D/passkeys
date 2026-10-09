@@ -1499,6 +1499,7 @@ dependencies = [
  "hex",
  "jsonwebtoken",
  "md5",
+ "openssl",
  "reqwest",
  "rstest",
  "serde",

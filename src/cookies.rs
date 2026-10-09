@@ -1,4 +1,4 @@
-use crate::env::{HOST_NAME, JWT_PRIVATE_KEY, JWT_PUBLIC_KEY};
+use crate::env::{HOST_NAME, JWT_PRIVATE_KEY, JWT_PUBLIC_KEY, ORIGIN};
 use axum_extra::extract::{CookieJar, cookie::Cookie};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
@@ -13,6 +13,9 @@ pub struct AuthCookie {
 
     /// The cookie expiration.
     pub exp: usize,
+
+    /// The cookie issuer.
+    pub iss: String,
 }
 
 /// Fetches the authentication details from the cookie jar.
@@ -46,6 +49,7 @@ pub fn authenticate(cookies: CookieJar, email: String) -> Result<CookieJar, Stri
         &AuthCookie {
             sub: email,
             exp: (Utc::now().timestamp() + cookie_expiration.whole_seconds()) as usize,
+            iss: ORIGIN.to_string().trim_end_matches("/").to_string(),
         },
         &private_key,
     ) {

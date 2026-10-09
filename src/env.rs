@@ -11,7 +11,7 @@ pub static JWT_PRIVATE_KEY: LazyLock<String> =
     LazyLock::new(|| env::var("JWT__PRIVATE_KEY").expect("JWT__PRIVATE_KEY is not set."));
 
 /// The `ORIGIN` environment variable.
-/// This is used to determine which host (with scheme) the passkeys belong to.
+/// This is used to determine which host (with scheme, and port) the passkeys belong to.
 pub static ORIGIN: LazyLock<Url> = LazyLock::new(|| {
     let origin = env::var("ORIGIN").expect("ORIGIN is not set.");
     Url::parse(&origin).expect("ORIGIN is not a valid URL")

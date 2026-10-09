@@ -70,7 +70,10 @@ export default {
     const url = new URL(request.url);
 
     // 1. Backend Routing
-    if (url.pathname.startsWith('/api/')) {
+    if (
+      url.pathname.startsWith('/api/') ||
+      url.pathname.startsWith('/.well-known/')
+    ) {
       const container = getContainer(env.RUST_CONTAINER);
       return await container.fetch(request);
     }
