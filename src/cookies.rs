@@ -1,4 +1,4 @@
-use crate::env::{JWT_PRIVATE_KEY, JWT_PUBLIC_KEY};
+use crate::env::{HOST_NAME, JWT_PRIVATE_KEY, JWT_PUBLIC_KEY};
 use axum_extra::extract::{CookieJar, cookie::Cookie};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
@@ -53,6 +53,8 @@ pub fn authenticate(cookies: CookieJar, email: String) -> Result<CookieJar, Stri
             let cookie = Cookie::build((AUTH_COOKIE_NAME, token))
                 .path("/")
                 .max_age(cookie_expiration)
+                .secure(!HOST_NAME.eq("localhost"))
+                .http_only(true)
                 .build();
             Ok(cookies.add(cookie))
         }

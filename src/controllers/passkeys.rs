@@ -1,4 +1,4 @@
-use crate::cookies::{authenticate, fetch};
+use crate::cookies::{authenticate, clear, fetch};
 use crate::db::{
     create_challenge, insert_passkey, redeem_challenge, select_passkeys, update_sign_count,
 };
@@ -507,6 +507,11 @@ pub async fn signin(
             )
         }
     }
+}
+
+/// Logs the user out.
+pub async fn signout(cookies: CookieJar) -> (CookieJar, impl IntoResponse) {
+    (clear(cookies), StatusCode::NO_CONTENT.into_response())
 }
 
 /// Fetches and validates the email address from the query string.

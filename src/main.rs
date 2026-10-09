@@ -4,7 +4,7 @@ mod db;
 mod env;
 mod webauthn;
 
-use crate::controllers::passkeys::{initiate_login, signin, signup};
+use crate::controllers::passkeys::{initiate_login, signin, signout, signup};
 use crate::controllers::users::{authenticated_user, delete_account, update_email};
 use axum::{
     Router,
@@ -33,6 +33,7 @@ fn router() -> Router {
         .route("/api/v1/passkeys/initiate-login", get(initiate_login))
         .route("/api/v1/passkeys/signup", post(signup))
         .route("/api/v1/passkeys/signin", post(signin))
+        .route("/api/v1/passkeys/signout", post(signout))
 }
 
 async fn shutdown_signal() {
