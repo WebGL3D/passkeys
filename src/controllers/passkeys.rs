@@ -14,6 +14,7 @@ use email_address::{EmailAddress, Options};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, error::Error};
 use uuid::Uuid;
+use webauthn_rs_core::proto::COSEAlgorithm;
 
 const PUBLIC_KEY_TYPE: &str = "public-key";
 const UNEXPECTED_ERROR: &str = "An unexpected error occurred, please try again.";
@@ -145,26 +146,19 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
         }
     };
 
+    let supported_public_keys: Vec<PublicKeyParam> = COSEAlgorithm::secure_algs()
+        .iter()
+        .map(|a| PublicKeyParam {
+            alg: *a as i32,
+            key_type: String::from(PUBLIC_KEY_TYPE),
+        })
+        .collect();
+
     Json(LoginMetadata {
         user_id: URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes()),
         challenge: challenge.id,
         origin: HOST_NAME.to_string(),
-        // These are the recommended algorithms: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#pubkeycredparams
-        supported_public_keys: [
-            PublicKeyParam {
-                alg: -7, /* EdDSA */
-                key_type: String::from(PUBLIC_KEY_TYPE),
-            },
-            PublicKeyParam {
-                alg: -8, /* ES256 */
-                key_type: String::from(PUBLIC_KEY_TYPE),
-            },
-            PublicKeyParam {
-                alg: -257, /* RS256 */
-                key_type: String::from(PUBLIC_KEY_TYPE),
-            },
-        ]
-        .to_vec(),
+        supported_public_keys,
         // 1 second accounting for latency
         timeout: challenge.expiration - ((Utc::now().timestamp() * 1000) as u64) - 1000,
         available_public_keys: passkeys,
