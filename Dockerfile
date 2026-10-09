@@ -41,7 +41,7 @@ RUN --mount=type=cache,id=cargo,target=/app/target cargo build --release && cp /
 # Run tests
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall cargo-nextest --secure -y
-RUN cargo nextest run
+RUN --mount=type=cache,id=cargo,target=/app/target cargo nextest run
 
 FROM debian:trixie-slim AS server
 WORKDIR /app
