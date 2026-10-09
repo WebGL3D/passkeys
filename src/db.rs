@@ -15,15 +15,19 @@ pub struct Passkey {
     pub public_key: String,
 
     /// The algorithm for the `public_key`.
+    #[allow(dead_code)]
     pub public_key_algorithm: i32,
 
     /// A hash of the email address for the user associated with the passkey.
+    #[allow(dead_code)]
     pub email_hash: String,
 
     /// How many times the private key has signed a challenge.
+    #[allow(dead_code)]
     pub sign_count: u32,
 
     /// The milliseconds after epoch when the passkey was registered.
+    #[allow(dead_code)]
     pub created: u64,
 }
 

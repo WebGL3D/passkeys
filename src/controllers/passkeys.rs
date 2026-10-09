@@ -69,9 +69,11 @@ pub struct CredentialCreateResponse {
     client_data_json: String,
 
     #[serde(rename = "publicKey")]
+    #[allow(dead_code)]
     public_key: String,
 
     #[serde(rename = "publicKeyAlgorithm")]
+    #[allow(dead_code)]
     public_key_algorithm: i32,
 }
 
@@ -88,6 +90,7 @@ pub struct CredentialFetchResponse {
 
     /// The ID of the user that they were signed up with.
     #[serde(rename = "userHandle")]
+    #[allow(dead_code)]
     user_id: String,
 }
 
