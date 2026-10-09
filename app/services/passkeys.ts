@@ -1,4 +1,3 @@
-import { AUTH_COOKIE } from '../constants';
 import { clearCache } from './users';
 
 type InitiateLoginResponse = {
@@ -106,13 +105,16 @@ export async function signin(email: string, publicKey: PublicKeyCredential) {
 }
 
 export async function signOut(): Promise<void> {
-  // There's no state on the server side about the session, so just deleting the cookie is enough.
-  if (!window.cookieStore) {
-    return Promise.reject(
-      'Browser does not support clearing cookies directly.',
-    );
+  const response = await fetch('/api/v1/passkeys/signout', {
+    credentials: 'include',
+    method: 'POST',
+  });
+
+  clearCache();
+
+  if (response.ok) {
+    return;
   }
 
-  await cookieStore.delete(AUTH_COOKIE);
-  clearCache();
+  return Promise.reject(`Failed to sign out: ${response.status}`);
 }

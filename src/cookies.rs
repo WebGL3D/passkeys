@@ -1,4 +1,4 @@
-use crate::env::{JWT_PRIVATE_KEY, JWT_PUBLIC_KEY};
+use crate::env::{HOST_NAME, ISSUER, JWT_PRIVATE_KEY, JWT_PUBLIC_KEY};
 use axum_extra::extract::{CookieJar, cookie::Cookie};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
@@ -13,6 +13,9 @@ pub struct AuthCookie {
 
     /// The cookie expiration.
     pub exp: usize,
+
+    /// The cookie issuer.
+    pub iss: String,
 }
 
 /// Fetches the authentication details from the cookie jar.
@@ -28,7 +31,13 @@ pub fn fetch(cookies: CookieJar) -> Result<AuthCookie, String> {
     };
 
     match decode::<AuthCookie>(cookie, &public_key, &Validation::new(Algorithm::RS256)) {
-        Ok(auth) => Ok(auth.claims),
+        Ok(auth) => {
+            if !auth.claims.iss.eq(ISSUER.as_str()) {
+                return Err(String::from("iss mismatch"));
+            }
+
+            Ok(auth.claims)
+        }
         Err(e) => Err(e.to_string()),
     }
 }
@@ -46,6 +55,7 @@ pub fn authenticate(cookies: CookieJar, email: String) -> Result<CookieJar, Stri
         &AuthCookie {
             sub: email,
             exp: (Utc::now().timestamp() + cookie_expiration.whole_seconds()) as usize,
+            iss: ISSUER.to_string(),
         },
         &private_key,
     ) {
@@ -53,6 +63,8 @@ pub fn authenticate(cookies: CookieJar, email: String) -> Result<CookieJar, Stri
             let cookie = Cookie::build((AUTH_COOKIE_NAME, token))
                 .path("/")
                 .max_age(cookie_expiration)
+                .secure(!HOST_NAME.eq("localhost"))
+                .http_only(true)
                 .build();
             Ok(cookies.add(cookie))
         }

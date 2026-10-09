@@ -1,4 +1,4 @@
-use crate::cookies::{authenticate, fetch};
+use crate::cookies::{authenticate, clear, fetch};
 use crate::db::{
     create_challenge, insert_passkey, redeem_challenge, select_passkeys, update_sign_count,
 };
@@ -12,7 +12,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use email_address::{EmailAddress, Options};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, error::Error};
+use std::collections::HashMap;
 use uuid::Uuid;
 use webauthn_rs_core::proto::COSEAlgorithm;
 
@@ -69,9 +69,11 @@ pub struct CredentialCreateResponse {
     client_data_json: String,
 
     #[serde(rename = "publicKey")]
+    #[allow(dead_code)]
     public_key: String,
 
     #[serde(rename = "publicKeyAlgorithm")]
+    #[allow(dead_code)]
     public_key_algorithm: i32,
 }
 
@@ -88,6 +90,7 @@ pub struct CredentialFetchResponse {
 
     /// The ID of the user that they were signed up with.
     #[serde(rename = "userHandle")]
+    #[allow(dead_code)]
     user_id: String,
 }
 
@@ -507,6 +510,11 @@ pub async fn signin(
             )
         }
     }
+}
+
+/// Logs the user out.
+pub async fn signout(cookies: CookieJar) -> (CookieJar, impl IntoResponse) {
+    (clear(cookies), StatusCode::NO_CONTENT.into_response())
 }
 
 /// Fetches and validates the email address from the query string.

@@ -1,5 +1,5 @@
-use crate::cookies::{authenticate, clear, fetch};
-use crate::db::{delete_user, update_email as db1_update_email};
+use crate::cookies::{AuthCookie, authenticate, clear, fetch};
+use crate::db::{delete_user, select_passkeys, update_email as db1_update_email};
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
 use email_address::{EmailAddress, Options};
@@ -23,20 +23,26 @@ pub struct UpdateEmailRequest {
 }
 
 /// Fetches the currently authenticated user.
-pub async fn authenticated_user(cookies: CookieJar) -> impl IntoResponse {
-    match fetch(cookies) {
+pub async fn authenticated_user(cookies: CookieJar) -> (CookieJar, impl IntoResponse) {
+    match get_user(cookies.clone()).await {
         Ok(user) => {
             let gravatar_hash = md5::compute(user.sub.to_lowercase());
-            Json(User {
-                email_address: user.sub,
-                avatar: format!(
-                    "https://www.gravatar.com/avatar/{:x}?size=150",
-                    gravatar_hash
-                ),
-            })
-            .into_response()
+            (
+                cookies,
+                Json(User {
+                    email_address: user.sub,
+                    avatar: format!(
+                        "https://www.gravatar.com/avatar/{:x}?size=150",
+                        gravatar_hash
+                    ),
+                })
+                .into_response(),
+            )
         }
-        Err(_) => StatusCode::UNAUTHORIZED.into_response(),
+        Err(err) => {
+            println!("{err}");
+            (clear(cookies), StatusCode::UNAUTHORIZED.into_response())
+        }
     }
 }
 
@@ -95,5 +101,27 @@ pub async fn delete_account(cookies: CookieJar) -> (CookieJar, impl IntoResponse
             println!("Failed to delete user: {err}");
             (cookies, StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
+    }
+}
+
+async fn get_user(cookies: CookieJar) -> Result<AuthCookie, String> {
+    match fetch(cookies) {
+        Ok(user) => {
+            let has_passkey = match select_passkeys(user.sub.to_string()).await {
+                Ok(passkeys) => !passkeys.is_empty(),
+                Err(err) => {
+                    return Err(format!("Failed to select passkeys for user: {err}"));
+                }
+            };
+
+            if !has_passkey {
+                return Err(String::from(
+                    "No passkeys for user - email has likely been changed, or account deleted.",
+                ));
+            }
+
+            Ok(user)
+        }
+        Err(err) => Err(format!("Failed to fetch authentication cookie: {err}")),
     }
 }

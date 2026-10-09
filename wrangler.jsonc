@@ -15,7 +15,7 @@
     {
       "class_name": "RustContainer",
       "image": "./Dockerfile",
-      "max_instances": 10,
+      "max_instances": 1,
     },
   ],
   "d1_databases": [
@@ -76,7 +76,7 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "html_handling": "drop-trailing-slash",
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": ["/api/*", "/.well-known/*"],
   },
   /**
    * Service Bindings (communicate between multiple Workers)

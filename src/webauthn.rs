@@ -1,5 +1,5 @@
 use crate::db::Passkey;
-use crate::env::{HOST_NAME, ORIGIN};
+use crate::env::{HOST_NAME, ISSUER};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
@@ -42,9 +42,11 @@ pub struct AuthenticatorData {
     /// The sha256 hashed bytes of the rpId
     ///
     /// Verified before being returned by `parse_authenticator_data`
+    #[allow(dead_code)]
     pub rp_id_hash: [u8; 32],
 
     /// The raw flags byte, from the authenticator data.
+    #[allow(dead_code)]
     pub flags: AuthenticatorFlags,
 
     /// The number of times the private key has been used to sign for this credential.
@@ -54,6 +56,7 @@ pub struct AuthenticatorData {
     /// A relying party can use this to find out the characteristics of the authenticator by looking up its metadata statement via the [FIDO metadata service](https://fidoalliance.org/metadata/).
     ///
     /// This is relevant in certain situations such as enterprise deployments or where regulatory requirements dictate a certain type of authenticator be used; it should be ignored otherwise.
+    #[allow(dead_code)]
     pub authenticator_attestation_guid: Option<Uuid>,
 
     /// A unique identifier for this credential so that it can be requested for future authentications.
@@ -87,6 +90,7 @@ pub struct AttestationObject {
     /// For passkeys that are synced between devices (e.g. Apple/iCloud), the attestation format will always be `none`.
     ///
     /// See also: [Defined Attestation Statement Formats](https://w3c.github.io/webauthn/#sctn-defined-attestation-formats), [IANA Registry](https://w3c.github.io/webauthn/#sctn-att-fmt-reg)
+    #[allow(dead_code)]
     pub format: String,
 
     /// The authenticator data, parsed from the attestation object.
@@ -120,6 +124,7 @@ struct InternalAttestationObject {
     fmt: String,
 
     #[serde(rename = "attStmt")]
+    #[allow(dead_code)]
     att_stmt: serde_cbor_2::Value,
 }
 
@@ -277,7 +282,7 @@ pub fn parse_client_data(
                 return Err(String::from("authn type did not match"));
             }
 
-            if !client_data.origin.eq(ORIGIN.as_str().trim_end_matches("/")) {
+            if !client_data.origin.eq(ISSUER.as_str()) {
                 return Err(String::from("origin did not match"));
             }
 
