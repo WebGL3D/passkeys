@@ -1,5 +1,5 @@
 use crate::db::Passkey;
-use crate::env::{HOST_NAME, ORIGIN};
+use crate::env::{HOST_NAME, ISSUER};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
@@ -282,7 +282,7 @@ pub fn parse_client_data(
                 return Err(String::from("authn type did not match"));
             }
 
-            if !client_data.origin.eq(ORIGIN.as_str().trim_end_matches("/")) {
+            if !client_data.origin.eq(ISSUER.as_str()) {
                 return Err(String::from("origin did not match"));
             }
 

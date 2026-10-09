@@ -12,10 +12,14 @@ pub static JWT_PRIVATE_KEY: LazyLock<String> =
 
 /// The `ORIGIN` environment variable.
 /// This is used to determine which host (with scheme, and port) the passkeys belong to.
-pub static ORIGIN: LazyLock<Url> = LazyLock::new(|| {
+static ORIGIN: LazyLock<Url> = LazyLock::new(|| {
     let origin = env::var("ORIGIN").expect("ORIGIN is not set.");
     Url::parse(&origin).expect("ORIGIN is not a valid URL")
 });
+
+/// The `iss` assigned to the JWT.
+pub static ISSUER: LazyLock<String> =
+    LazyLock::new(|| ORIGIN.to_string().trim_end_matches("/").to_string());
 
 /// The hostname, parsed from the `ORIGIN` - port not included.
 pub static HOST_NAME: LazyLock<String> =
