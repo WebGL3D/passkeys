@@ -12,7 +12,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use email_address::{EmailAddress, Options};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, error::Error};
+use std::collections::HashMap;
 use uuid::Uuid;
 use webauthn_rs_core::proto::COSEAlgorithm;
 
