@@ -4,7 +4,7 @@ mod db;
 mod env;
 mod webauthn;
 
-use crate::controllers::jwks::jwks;
+use crate::controllers::jwks::{jwks, openid_configuration};
 use crate::controllers::passkeys::{initiate_login, signin, signout, signup};
 use crate::controllers::users::{authenticated_user, delete_account, update_email};
 use axum::{
@@ -28,6 +28,10 @@ async fn main() {
 
 fn router() -> Router {
     Router::new()
+        .route(
+            "/.well-known/openid-configuration",
+            get(openid_configuration),
+        )
         .route("/.well-known/jwks.json", get(jwks))
         .route("/api/v1/users/authenticated", get(authenticated_user))
         .route("/api/v1/users/authenticated", delete(delete_account))

@@ -1,10 +1,22 @@
-use crate::env::JWT_PUBLIC_KEY;
+use crate::env::{ISSUER, JWT_PUBLIC_KEY};
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Serialize;
+
+/// Specified by [openid.net](https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderMetadata)
+///
+/// Most required fields are omitted, because this application does not actually implement OpenID.
+#[derive(Serialize)]
+pub struct OpenIdConfiguration {
+    /// The JWT `iss` field.
+    pub issuer: String,
+
+    /// The endpoint where the JWKS can be found.
+    pub jwks_uri: String,
+}
 
 /// The result model for the .well-known/jwks endpoint.
 #[derive(Serialize)]
@@ -45,6 +57,17 @@ pub struct Jwk {
     ///
     /// See also: [RSA_get0_key](https://docs.openssl.org/master/man3/RSA_get0_key/#synopsis)
     pub e: String,
+}
+
+/// The .well-known/openid-configuration endpoint.
+///
+/// This application doesn't expose OpenID connect, but this endpoint will be loaded by jwt.io automatically.
+/// This allows for verification/inspection of the JWT returned in the cookie, for educational purposes.
+pub async fn openid_configuration() -> impl IntoResponse {
+    Json(OpenIdConfiguration {
+        issuer: ISSUER.to_string(),
+        jwks_uri: format!("{}/.well-known/jwks.json", ISSUER.to_string()),
+    })
 }
 
 /// The .well-known/jwks.json endpoint - used for signature verification of the JWT.
