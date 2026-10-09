@@ -329,18 +329,10 @@ pub fn verify_signature(
 /// Parses the `COSEKey` from a base64 (url) encoded string.
 fn parse_cose_key(encoded_key: String) -> Result<COSEKey, String> {
     match URL_SAFE_NO_PAD.decode(encoded_key) {
-        Ok(public_key) => {
-            let cose_key: serde_cbor_2::Value =
-                match serde_cbor_2::from_reader(public_key.as_slice()) {
-                    Ok(cose_key) => cose_key,
-                    Err(err) => return Err(format!("Failed to parse encoded COSE key: {err}")),
-                };
-
-            match COSEKey::try_from(&cose_key) {
-                Ok(cose_key) => Ok(cose_key),
-                Err(err) => Err(format!("Failed to translate COSE key: {err}")),
-            }
-        }
+        Ok(public_key) => match serde_cbor_2::from_slice(public_key.as_slice()) {
+            Ok(cose_key) => Ok(cose_key),
+            Err(err) => Err(format!("Failed to parse encoded COSE key: {err}")),
+        },
         Err(err) => Err(format!("Failed to parse public key: {err}")),
     }
 }
