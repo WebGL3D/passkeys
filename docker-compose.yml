@@ -32,6 +32,13 @@ services:
 
     restart: 'always'
 
+  db:
+    image: ghcr.io/getmockd/mockd:v0.7.1
+    hostname: d1.webgl3d.dev
+    volumes:
+      - ./tests/db-mock.yml:/mockd.yaml
+    command: serve --config /mockd.yaml --port 80
+
 # Ensure all the services in this docker-compose file connect to the tix-factory docker network.
 networks:
   default:

@@ -43,7 +43,7 @@ jobs:
 
       - name: '🔌 Ensure Connectivity (api)'
         run: >-
-          curl -v --fail http://localhost:${{ env.PASSKEYS_API_PORT }}/api/v1/passkeys/metadata
+          curl -v --fail http://localhost:${{ env.PASSKEYS_API_PORT }}/api/v1/passkeys/initiate-login?email=a@b.com
 
       - name: '🔌 Ensure Connectivity (app)'
         run: >-

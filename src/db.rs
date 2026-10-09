@@ -80,7 +80,7 @@ pub async fn create_challenge(email: String) -> Result<Challenge, String> {
             Some(challenge) => Ok(challenge.clone()),
             None => Err(String::from("No challenge was returned from insert query.")),
         },
-        Err(_) => Err(String::from("Failed to insert challenge into database.")),
+        Err(err) => Err(format!("Failed to insert challenge into database: {err}")),
     }
 }
 

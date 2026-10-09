@@ -1,0 +1,53 @@
+version: '1.0'
+
+admins:
+  - name: local
+    port: 4290
+
+engines:
+  - name: default
+    httpPort: 4280
+    admin: local
+
+workspaces:
+  - name: default
+    engines: [default]
+
+mocks:
+  - id: create-challenge
+    workspace: default
+    type: http
+    http:
+      matcher:
+        method: GET
+        path: /query
+        queryParams:
+          name: CHALLENGES_INSERT
+      response:
+        statusCode: 200
+        headers:
+          Content-Type: application/json
+        body: |-
+          [
+            {
+              "id": "{{request.query.arg}}",
+              "email_hash": "mockd",
+              "expiration": 0
+            }
+          ]
+
+  - id: fetch-passkeys
+    workspace: default
+    type: http
+    http:
+      matcher:
+        method: GET
+        path: /query
+        queryParams:
+          name: PASSKEYS_SELECT
+      response:
+        statusCode: 200
+        headers:
+          Content-Type: application/json
+        body: >-
+          []
