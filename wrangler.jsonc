@@ -6,7 +6,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "passkeys-demo",
   "main": "worker/index.ts",
-  "compatibility_date": "2025-10-08",
+  "compatibility_date": "2026-09-08",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
@@ -16,6 +16,13 @@
       "class_name": "RustContainer",
       "image": "./Dockerfile",
       "max_instances": 10,
+    },
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "authentication",
+      "database_id": "59fa0da6-1dcd-444c-a16c-1b0bbdac3cfe",
     },
   ],
   "durable_objects": {
@@ -50,9 +57,15 @@
    * Note: Use secrets to store sensitive data.
    * https://developers.cloudflare.com/workers/configuration/secrets/
    */
-  "vars": { "HELLO": "world" },
+  "vars": {
+    "ORIGIN": "https://passkeys.webgl3d.dev",
+    "CHALLENGE_EXPIRATION_SECONDS": "300",
+  },
+  "secrets": {
+    "required": ["JWT__PRIVATE_KEY", "JWT__PUBLIC_KEY"],
+  },
   "previews": {
-    "vars": { "HELLO": "world" },
+    "vars": { "ORIGIN": "https://passkeys-demo.tixfactory.workers.dev" },
   },
   /**
    * Static Assets
@@ -61,6 +74,9 @@
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "html_handling": "drop-trailing-slash",
+    "run_worker_first": ["/api/*"],
   },
   /**
    * Service Bindings (communicate between multiple Workers)

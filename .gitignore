@@ -26,6 +26,9 @@ dist-ssr
 # Rust
 target/
 
+# Secrets
+*.pem
+
 # Wrangler
 .wrangler/
 .env*
