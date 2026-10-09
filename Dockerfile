@@ -38,10 +38,10 @@ WORKDIR /app
 RUN mkdir dist
 RUN --mount=type=cache,id=cargo,target=/app/target cargo build --release && cp /app/target/release/passkeys-demo /app/dist/passkeys-demo
 
-# Run tests (once written)
-# RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-# RUN cargo binstall cargo-nextest --secure -y
-# RUN cargo nextest run
+# Run tests
+RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+RUN cargo binstall cargo-nextest --secure -y
+RUN cargo nextest run
 
 FROM debian:trixie-slim AS server
 WORKDIR /app
