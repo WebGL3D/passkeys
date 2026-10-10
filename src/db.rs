@@ -36,8 +36,10 @@ pub struct Passkey {
     pub updated: u64,
 
     /// The milliseconds after epoch when the passkey was registered.
-    #[allow(dead_code)]
     pub created: u64,
+
+    /// The milliseconds after epoch when the passkey was last used for authentication.
+    pub last_used: u64,
 }
 
 /// The challenge record from the database.
@@ -174,17 +176,20 @@ pub async fn update_sign_count(passkey_id: String, sign_count: u32) -> Result<bo
     if sign_count == 0 {
         // Sign count will be explicitly set to zero when the authenticator doesn't support it.
         // https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API/Authenticator_data#signcount
-        return Ok(true);
-    }
-
-    match db1_query::<Passkey>(
-        "PASSKEYS_UPDATE_SIGN_COUNT",
-        vec![sign_count.to_string(), passkey_id, sign_count.to_string()],
-    )
-    .await
-    {
-        Ok(passkeys) => Ok(!passkeys.is_empty()),
-        Err(err) => Err(format!("Failed to update passkey sign count: {err}")),
+        match db1_query::<Passkey>("PASSKEYS_UPDATE_LAST_USED", vec![passkey_id]).await {
+            Ok(passkeys) => Ok(!passkeys.is_empty()),
+            Err(err) => Err(format!("Failed to update passkey last used: {err}")),
+        }
+    } else {
+        match db1_query::<Passkey>(
+            "PASSKEYS_UPDATE_SIGN_COUNT",
+            vec![sign_count.to_string(), passkey_id, sign_count.to_string()],
+        )
+        .await
+        {
+            Ok(passkeys) => Ok(!passkeys.is_empty()),
+            Err(err) => Err(format!("Failed to update passkey sign count: {err}")),
+        }
     }
 }
 

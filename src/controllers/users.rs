@@ -32,6 +32,7 @@ pub struct Passkey {
     /// How many times the passkey has signed a credential.
     ///
     /// zero if the authenticator does not support this.
+    #[serde(rename = "signCount")]
     pub sign_count: u32,
 
     /// The Authenticator Attestation Globally Unique Identifier.
@@ -39,6 +40,10 @@ pub struct Passkey {
 
     /// The format of the passkey at initial attestation.
     pub format: String,
+
+    /// The timestamp the passkey was last used for authentication.
+    #[serde(with = "time::serde::iso8601", rename = "lastUsed")]
+    pub last_used: OffsetDateTime,
 
     /// The timestamp the passkey was last updated.
     #[serde(with = "time::serde::iso8601")]
@@ -146,6 +151,14 @@ pub async fn fetch_passkeys(cookies: CookieJar) -> impl IntoResponse {
                 aaguid: p.aaguid.to_string(),
                 format: p.format.to_string(),
                 sign_count: p.sign_count,
+                last_used: OffsetDateTime::from_unix_timestamp((p.last_used / 1000) as i64)
+                    .unwrap_or_else(|err| {
+                        println!(
+                            "Failed to translate last used date for passkey ({}): {}",
+                            p.last_used, err
+                        );
+                        OffsetDateTime::UNIX_EPOCH
+                    }),
                 updated: OffsetDateTime::from_unix_timestamp((p.updated / 1000) as i64)
                     .unwrap_or_else(|err| {
                         println!(

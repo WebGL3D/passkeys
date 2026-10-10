@@ -48,7 +48,8 @@ export default function Passkeys() {
                 <br />
                 Authenticator Attestation GUID: {passkey.aaguid}
                 <br />
-                Registered: {passkey.created.toLocaleDateString()}
+                Registered: {passkey.created.toLocaleDateString()} (last used:{' '}
+                {passkey.lastUsed.toLocaleDateString()})
               </Typography>
             </Box>
           </Paper>
