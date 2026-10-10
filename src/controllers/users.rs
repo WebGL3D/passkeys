@@ -4,6 +4,7 @@ use axum::{Json, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
 use email_address::{EmailAddress, Options};
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 
 #[derive(Serialize)]
 struct User {
@@ -20,6 +21,32 @@ pub struct UpdateEmailRequest {
     /// The new email address to set.
     #[serde(rename = "emailAddress")]
     email_address: String,
+}
+
+/// Information about a stored passkey.
+#[derive(Serialize)]
+pub struct Passkey {
+    /// The credential ID.
+    pub id: String,
+
+    /// How many times the passkey has signed a credential.
+    ///
+    /// zero if the authenticator does not support this.
+    pub sign_count: u32,
+
+    /// The Authenticator Attestation Globally Unique Identifier.
+    pub aaguid: String,
+
+    /// The format of the passkey at initial attestation.
+    pub format: String,
+
+    /// The timestamp the passkey was last updated.
+    #[serde(with = "time::serde::iso8601")]
+    pub updated: OffsetDateTime,
+
+    /// The timestamp the passkey was created.
+    #[serde(with = "time::serde::iso8601")]
+    pub created: OffsetDateTime,
 }
 
 /// Fetches the currently authenticated user.
@@ -102,6 +129,48 @@ pub async fn delete_account(cookies: CookieJar) -> (CookieJar, impl IntoResponse
             (cookies, StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
     }
+}
+
+/// Fetches all passkeys associated with the authenticated user.
+pub async fn fetch_passkeys(cookies: CookieJar) -> impl IntoResponse {
+    let cookie = match get_user(cookies).await {
+        Ok(user) => user,
+        Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    let passkeys: Vec<Passkey> = match select_passkeys(cookie.sub).await {
+        Ok(passkeys) => passkeys
+            .iter()
+            .map(|p| Passkey {
+                id: p.id.to_string(),
+                aaguid: p.aaguid.to_string(),
+                format: p.format.to_string(),
+                sign_count: p.sign_count,
+                updated: OffsetDateTime::from_unix_timestamp((p.updated / 1000) as i64)
+                    .unwrap_or_else(|err| {
+                        println!(
+                            "Failed to translate updated date for passkey ({}): {}",
+                            p.updated, err
+                        );
+                        OffsetDateTime::UNIX_EPOCH
+                    }),
+                created: OffsetDateTime::from_unix_timestamp((p.created / 1000) as i64)
+                    .unwrap_or_else(|err| {
+                        println!(
+                            "Failed to translate created date for passkey ({}): {}",
+                            p.created, err
+                        );
+                        OffsetDateTime::UNIX_EPOCH
+                    }),
+            })
+            .collect(),
+        Err(err) => {
+            println!("Failed to select passkeys for user: {err}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    Json(passkeys).into_response()
 }
 
 async fn get_user(cookies: CookieJar) -> Result<AuthCookie, String> {

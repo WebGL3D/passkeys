@@ -23,9 +23,17 @@ pub struct Passkey {
     #[allow(dead_code)]
     pub email_hash: String,
 
+    /// The format of the passkey at initial attestation
+    pub format: String,
+
+    /// The Authenticator Attestation Globally Unique Identifier.
+    pub aaguid: String,
+
     /// How many times the private key has signed a challenge.
-    #[allow(dead_code)]
     pub sign_count: u32,
+
+    /// The milliseconds after epoch when the passkey was last updated.
+    pub updated: u64,
 
     /// The milliseconds after epoch when the passkey was registered.
     #[allow(dead_code)]
@@ -132,6 +140,14 @@ pub async fn insert_passkey(
         None => return Err(String::from("Invalid credential public key algorithm")),
     };
 
+    let aaguid = match attestation_object
+        .authenticator_data
+        .authenticator_attestation_guid
+    {
+        Some(g) => g.as_hyphenated().to_string(),
+        None => return Err(String::from("Invalid Authenticator Attestation GUID")),
+    };
+
     match db1_query::<Passkey>(
         "PASSKEYS_INSERT",
         vec![
@@ -139,6 +155,8 @@ pub async fn insert_passkey(
             hash_email(email),
             credential_public_key,
             credential_algorithm.to_string(),
+            attestation_object.format,
+            aaguid,
         ],
     )
     .await

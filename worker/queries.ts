@@ -14,6 +14,12 @@ const PASSKEYS_CREATE_TABLE = `CREATE TABLE IF NOT EXISTS passkeys(
   /* The algorithm for the public key */
   public_key_algorithm INTEGER,
 
+  /* The format of the passkey at initial attestation */
+  format TEXT,
+
+  /* The Authenticator Attestation Globally Unique Identifier */
+  aaguid TEXT,
+
   /* How many times the private key has signed a challenge */
   sign_count INTEGER DEFAULT(0),
 
@@ -41,7 +47,7 @@ DELETE FROM challenges WHERE expiration < (unixepoch('subsec') * 1000);
 `;
 
 const PASSKEYS_SELECT_EMAIL_HASH = `SELECT * FROM passkeys WHERE [email_hash] = ?`;
-const PASSKEYS_INSERT = `INSERT INTO passkeys ([id], [email_hash], [public_key], [public_key_algorithm]) VALUES (?, ?, ?, ?) RETURNING *`;
+const PASSKEYS_INSERT = `INSERT INTO passkeys ([id], [email_hash], [public_key], [public_key_algorithm], [format], [aaguid]) VALUES (?, ?, ?, ?, ?, ?) RETURNING *`;
 const PASSKEYS_UPDATE_EMAIL_HASH = `UPDATE passkeys SET
   [email_hash] = ?,
   [updated] = unixepoch('subsec') * 1000

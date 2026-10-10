@@ -3,6 +3,7 @@ import { Fragment, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import useAuthenticatedUser from '../../hooks/useAuthenticatedUser';
 import AccountSettings from './account-settings';
+import Passkeys from './passkeys';
 
 export default function Settings() {
   const [authenticatedUser] = useAuthenticatedUser();
@@ -21,6 +22,7 @@ export default function Settings() {
   return (
     <Box sx={{ maxWidth: '500px', margin: 'auto' }}>
       <AccountSettings />
+      <Passkeys />
     </Box>
   );
 }

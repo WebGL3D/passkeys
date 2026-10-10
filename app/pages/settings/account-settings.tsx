@@ -75,8 +75,10 @@ export default function AccountSettings() {
       <Typography variant="h4" component="h1">
         Account Settings
       </Typography>
-      <Collapse in={!!alertText} sx={{ mt: 1, mb: 1 }}>
-        <Alert severity={alertSeverity}>{alertText}</Alert>
+      <Collapse in={!!alertText}>
+        <Alert severity={alertSeverity} sx={{ mt: 1, mb: 1 }}>
+          {alertText}
+        </Alert>
       </Collapse>
       <Paper sx={{ p: 1 }}>
         <FormGroup sx={{ display: 'flex', flexDirection: 'row' }}>

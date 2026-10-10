@@ -20,7 +20,7 @@ serde_json = "1.0.151"
 chrono = "0.4.45"
 bitflags = "2.13.2"
 jsonwebtoken = { version = "11.1.0", features = ["rust_crypto"] }
-time = "0.3.55"
+time = { version = "0.3.55", features = ["serde"] }
 md5 = "0.8.1"
 urlencoding = "2.1.3"
 webauthn-rs-core = "0.5.5"
