@@ -1,3 +1,4 @@
+use crate::env::HOST_NAME;
 use crate::webauthn::AttestationObject;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reqwest::Error;
@@ -22,13 +23,23 @@ pub struct Passkey {
     #[allow(dead_code)]
     pub email_hash: String,
 
+    /// The format of the passkey at initial attestation
+    pub format: String,
+
+    /// The Authenticator Attestation Globally Unique Identifier.
+    pub aaguid: String,
+
     /// How many times the private key has signed a challenge.
-    #[allow(dead_code)]
     pub sign_count: u32,
 
+    /// The milliseconds after epoch when the passkey was last updated.
+    pub updated: u64,
+
     /// The milliseconds after epoch when the passkey was registered.
-    #[allow(dead_code)]
     pub created: u64,
+
+    /// The milliseconds after epoch when the passkey was last used for authentication.
+    pub last_used: u64,
 }
 
 /// The challenge record from the database.
@@ -61,11 +72,13 @@ pub async fn db1_query<T: DeserializeOwned>(
         String::from("")
     };
 
-    match reqwest::get(format!(
-        "http://d1.webgl3d.dev/query?name={name}{query_string}"
-    ))
-    .await
-    {
+    let url = format!("http://d1.webgl3d.dev/query?name={name}{query_string}");
+
+    if HOST_NAME.eq("localhost") {
+        println!("Executing D1: {url}");
+    }
+
+    match reqwest::get(url).await {
         Ok(response) => response.json::<Vec<T>>().await,
         Err(error) => Err(error),
     }
@@ -129,6 +142,14 @@ pub async fn insert_passkey(
         None => return Err(String::from("Invalid credential public key algorithm")),
     };
 
+    let aaguid = match attestation_object
+        .authenticator_data
+        .authenticator_attestation_guid
+    {
+        Some(g) => g.as_hyphenated().to_string(),
+        None => return Err(String::from("Invalid Authenticator Attestation GUID")),
+    };
+
     match db1_query::<Passkey>(
         "PASSKEYS_INSERT",
         vec![
@@ -136,6 +157,8 @@ pub async fn insert_passkey(
             hash_email(email),
             credential_public_key,
             credential_algorithm.to_string(),
+            attestation_object.format,
+            aaguid,
         ],
     )
     .await
@@ -153,17 +176,20 @@ pub async fn update_sign_count(passkey_id: String, sign_count: u32) -> Result<bo
     if sign_count == 0 {
         // Sign count will be explicitly set to zero when the authenticator doesn't support it.
         // https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API/Authenticator_data#signcount
-        return Ok(true);
-    }
-
-    match db1_query::<Passkey>(
-        "PASSKEYS_UPDATE_SIGN_COUNT",
-        vec![sign_count.to_string(), passkey_id, sign_count.to_string()],
-    )
-    .await
-    {
-        Ok(passkeys) => Ok(!passkeys.is_empty()),
-        Err(err) => Err(format!("Failed to update passkey sign count: {err}")),
+        match db1_query::<Passkey>("PASSKEYS_UPDATE_LAST_USED", vec![passkey_id]).await {
+            Ok(passkeys) => Ok(!passkeys.is_empty()),
+            Err(err) => Err(format!("Failed to update passkey last used: {err}")),
+        }
+    } else {
+        match db1_query::<Passkey>(
+            "PASSKEYS_UPDATE_SIGN_COUNT",
+            vec![sign_count.to_string(), passkey_id, sign_count.to_string()],
+        )
+        .await
+        {
+            Ok(passkeys) => Ok(!passkeys.is_empty()),
+            Err(err) => Err(format!("Failed to update passkey sign count: {err}")),
+        }
     }
 }
 

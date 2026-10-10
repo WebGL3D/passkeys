@@ -6,6 +6,26 @@ export type User = {
   avatar: string;
 };
 
+type SerializedPasskey = {
+  id: string;
+  format: string;
+  aaguid: string;
+  signCount: number;
+  lastUsed: string;
+  created: string;
+  updated: string;
+};
+
+export type Passkey = {
+  id: string;
+  format: string;
+  aaguid: string;
+  signCount: number;
+  lastUsed: Date;
+  created: Date;
+  updated: Date;
+};
+
 async function loadAuthenticatedUser(): Promise<User | null> {
   const response = await fetch('/api/v1/users/authenticated', {
     credentials: 'include',
@@ -62,7 +82,7 @@ export async function updateEmail(emailAddress: string): Promise<void> {
   return Promise.resolve();
 }
 
-// Deletes the currently authenticated user account.
+// Deletes the currently authenticated user "account".
 export async function deleteAccount(): Promise<void> {
   const response = await fetch('/api/v1/users/authenticated', {
     credentials: 'include',
@@ -78,4 +98,32 @@ export async function deleteAccount(): Promise<void> {
   cachedUser = Promise.resolve(null);
   AuthenticatedUserChanged.dispatchEvent(new Event('changed'));
   return Promise.resolve();
+}
+
+// Selects all of the passkeys associated with the authenticated user.
+export async function getPasskeys(): Promise<Passkey[]> {
+  const response = await fetch('/api/v1/users/authenticated/passkeys', {
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    return Promise.reject(
+      `Failed to fetch passkeys - error code: ${response.status}`,
+    );
+  }
+
+  const result: SerializedPasskey[] = await response.json();
+  return result.map(
+    ({ id, aaguid, format, signCount, lastUsed, created, updated }) => {
+      return {
+        id,
+        aaguid,
+        format,
+        signCount,
+        lastUsed: new Date(lastUsed),
+        created: new Date(created),
+        updated: new Date(updated),
+      };
+    },
+  );
 }

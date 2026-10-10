@@ -14,14 +14,23 @@ const PASSKEYS_CREATE_TABLE = `CREATE TABLE IF NOT EXISTS passkeys(
   /* The algorithm for the public key */
   public_key_algorithm INTEGER,
 
+  /* The format of the passkey at initial attestation */
+  format TEXT,
+
+  /* The Authenticator Attestation Globally Unique Identifier */
+  aaguid TEXT,
+
   /* How many times the private key has signed a challenge */
   sign_count INTEGER DEFAULT(0),
 
   /* A timestamp for when the passkey was created */
   created    INTEGER DEFAULT(unixepoch('subsec') * 1000),
 
-  /* A timestamp for when the passkey was last updated (effectively, used) */
-  updated    INTEGER DEFAULT(unixepoch('subsec') * 1000)
+  /* A timestamp for when the passkey record was last modified */
+  updated    INTEGER DEFAULT(unixepoch('subsec') * 1000),
+
+  /* A timestamp for when the passkey was last used for authentication */
+  last_used  INTEGER DEFAULT(unixepoch('subsec') * 1000)
 );
 `;
 
@@ -41,7 +50,7 @@ DELETE FROM challenges WHERE expiration < (unixepoch('subsec') * 1000);
 `;
 
 const PASSKEYS_SELECT_EMAIL_HASH = `SELECT * FROM passkeys WHERE [email_hash] = ?`;
-const PASSKEYS_INSERT = `INSERT INTO passkeys ([id], [email_hash], [public_key], [public_key_algorithm]) VALUES (?, ?, ?, ?) RETURNING *`;
+const PASSKEYS_INSERT = `INSERT INTO passkeys ([id], [email_hash], [public_key], [public_key_algorithm], [format], [aaguid]) VALUES (?, ?, ?, ?, ?, ?) RETURNING *`;
 const PASSKEYS_UPDATE_EMAIL_HASH = `UPDATE passkeys SET
   [email_hash] = ?,
   [updated] = unixepoch('subsec') * 1000
@@ -49,9 +58,15 @@ WHERE [email_hash] = ?
 RETURNING *`;
 const PASSKEYS_UPDATE_SIGN_COUNT = `UPDATE passkeys SET
   [sign_count] = ?,
-  [updated] = unixepoch('subsec') * 1000
+  [updated] = unixepoch('subsec') * 1000,
+  [last_used] = unixepoch('subsec') * 1000
 WHERE [id] = ?
 AND [sign_count] < ?
+RETURNING *`;
+const PASSKEYS_UPDATE_LAST_USED = `UPDATE passkeys SET
+  [updated] = unixepoch('subsec') * 1000,
+  [last_used] = unixepoch('subsec') * 1000
+WHERE [id] = ?
 RETURNING *`;
 const PASSKEYS_DELETE = `DELETE FROM passkeys WHERE [id] = ? RETURNING *`;
 const USERS_DELETE = `DELETE FROM challenges WHERE [email_hash] = ?;
@@ -66,6 +81,7 @@ const QUERIES: { [name: string]: string } = {
     PASSKEYS_CREATE_TABLE + PASSKEYS_UPDATE_EMAIL_HASH,
   PASSKEYS_UPDATE_SIGN_COUNT:
     PASSKEYS_CREATE_TABLE + PASSKEYS_UPDATE_SIGN_COUNT,
+  PASSKEYS_UPDATE_LAST_USED: PASSKEYS_CREATE_TABLE + PASSKEYS_UPDATE_LAST_USED,
   PASSKEYS_DELETE: PASSKEYS_CREATE_TABLE + PASSKEYS_DELETE,
   CHALLENGES_INSERT: CHALLENGES_CREATE_TABLE + CHALLENGES_INSERT,
   CHALLENGES_REDEEM: CHALLENGES_CREATE_TABLE + CHALLENGES_REDEEM,

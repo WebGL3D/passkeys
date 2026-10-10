@@ -6,7 +6,7 @@ mod webauthn;
 
 use crate::controllers::jwks::{jwks, openid_configuration};
 use crate::controllers::passkeys::{initiate_login, signin, signout, signup};
-use crate::controllers::users::{authenticated_user, delete_account, update_email};
+use crate::controllers::users::{authenticated_user, delete_account, fetch_passkeys, update_email};
 use axum::http::Method;
 use axum::{
     Router,
@@ -45,6 +45,7 @@ fn router() -> Router {
         .route("/.well-known/jwks.json", get(jwks).layer(well_known_cors))
         .route("/api/v1/users/authenticated", get(authenticated_user))
         .route("/api/v1/users/authenticated", delete(delete_account))
+        .route("/api/v1/users/authenticated/passkeys", get(fetch_passkeys))
         .route("/api/v1/users/email", post(update_email))
         .route("/api/v1/passkeys/initiate-login", get(initiate_login))
         .route("/api/v1/passkeys/signup", post(signup))
