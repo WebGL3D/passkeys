@@ -3,7 +3,7 @@ import NavigationAvatarMenu from './avatar-menu';
 
 export default function Navigation() {
   return (
-    <AppBar>
+    <AppBar component="nav" position="static" sx={{ mb: 1 }}>
       <Toolbar>
         <Box sx={{ flexGrow: 1 }}></Box>
         <Box sx={{ flexGrow: 0 }}>
