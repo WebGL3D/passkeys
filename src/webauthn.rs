@@ -186,7 +186,6 @@ pub fn parse_authenticator_data(authenticator_data: String) -> Result<Authentica
 
         credential_id =
             Some(URL_SAFE_NO_PAD.encode(&parsed_data[credential_id_start..credential_id_end]));
-        println!("credential_id: {:?}", credential_id);
 
         let credential_value: serde_cbor_2::Value =
             match serde_cbor_2::from_reader(&parsed_data[credential_id_end..]) {
@@ -210,7 +209,6 @@ pub fn parse_authenticator_data(authenticator_data: String) -> Result<Authentica
                 return Err(format!("Failed to parse COSE key: {err}"));
             }
         });
-        println!("credential public key: {:?}", credential_public_key);
     }
 
     Ok(AuthenticatorData {
