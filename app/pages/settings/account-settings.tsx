@@ -130,6 +130,11 @@ export default function AccountSettings() {
           Updating your email address here will not update the name stored with
           your passkey authenticator. This only changes the email you sign in
           with.
+          <br />
+          Maybe in the future?{' '}
+          <Link href="https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredential/signalCurrentUserDetails_static">
+            PublicKeyCredential.signalCurrentUserDetails
+          </Link>
         </Typography>
       </Paper>
     </Fragment>
