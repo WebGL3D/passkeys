@@ -1,3 +1,4 @@
+use crate::env::HOST_NAME;
 use crate::webauthn::AttestationObject;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reqwest::Error;
@@ -61,11 +62,13 @@ pub async fn db1_query<T: DeserializeOwned>(
         String::from("")
     };
 
-    match reqwest::get(format!(
-        "http://d1.webgl3d.dev/query?name={name}{query_string}"
-    ))
-    .await
-    {
+    let url = format!("http://d1.webgl3d.dev/query?name={name}{query_string}");
+
+    if HOST_NAME.eq("localhost") {
+        println!("Executing D1: {url}");
+    }
+
+    match reqwest::get(url).await {
         Ok(response) => response.json::<Vec<T>>().await,
         Err(error) => Err(error),
     }

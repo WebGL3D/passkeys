@@ -67,7 +67,7 @@ pub async fn update_email(
         Err(_) => return (cookies, StatusCode::BAD_REQUEST.into_response()),
     };
 
-    match db1_update_email(original_email, new_email.to_string()).await {
+    match db1_update_email(new_email.to_string(), original_email).await {
         Ok(passkeys) => {
             println!("Updated {} passkeys with new email address", passkeys.len());
             match authenticate(cookies.clone(), new_email) {

@@ -1,0 +1,10 @@
+#edit-avatar {
+  > * {
+    opacity: 0;
+    transition: opacity 0.25s;
+  }
+
+  &:hover > * {
+    opacity: 1;
+  }
+}

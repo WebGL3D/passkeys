@@ -11,7 +11,7 @@ export class RustContainer extends Container<Env> {
   enableInternet = false;
 
   // Time before container sleeps due to inactivity (default: 30s)
-  sleepAfter = '30s';
+  sleepAfter = env.ORIGIN.includes('localhost') ? '5m' : '30s';
 
   // Environment variables passed to the container
   envVars = {
