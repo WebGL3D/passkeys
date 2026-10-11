@@ -1,5 +1,5 @@
 use crate::cookies::{authenticate, clear, fetch, get_cookie};
-use crate::db::{delete_user, select_passkeys, update_email as db1_update_email};
+use crate::db::{delete_user, update_email as db1_update_email};
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
 use email_address::{EmailAddress, Options};
@@ -60,7 +60,7 @@ pub struct Passkey {
 /// Fetches the currently authenticated user.
 pub async fn authenticated_user(cookies: CookieJar) -> (CookieJar, impl IntoResponse) {
     match get_cookie(cookies.clone()).await {
-        Ok((cookie, user)) => {
+        Ok((cookie, user, _)) => {
             let gravatar_hash = md5::compute(cookie.sub.to_lowercase());
             (
                 cookies,
@@ -150,13 +150,13 @@ pub async fn delete_account(cookies: CookieJar) -> (CookieJar, impl IntoResponse
 
 /// Fetches all passkeys associated with the authenticated user.
 pub async fn fetch_passkeys(cookies: CookieJar) -> impl IntoResponse {
-    let user = match get_cookie(cookies).await {
-        Ok((_, user)) => user,
+    let passkeys = match get_cookie(cookies).await {
+        Ok((_, _, passkeys)) => passkeys,
         Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let passkeys: Vec<Passkey> = match select_passkeys(&user).await {
-        Ok(passkeys) => passkeys
+    let results: Vec<Passkey> =
+        passkeys
             .iter()
             .map(|p| Passkey {
                 id: p.id.to_string(),
@@ -188,12 +188,7 @@ pub async fn fetch_passkeys(cookies: CookieJar) -> impl IntoResponse {
                         OffsetDateTime::UNIX_EPOCH
                     }),
             })
-            .collect(),
-        Err(err) => {
-            println!("Failed to select passkeys for user: {err}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
+            .collect();
 
-    Json(passkeys).into_response()
+    Json(results).into_response()
 }
