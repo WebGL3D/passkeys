@@ -1,6 +1,7 @@
 use crate::cookies::{authenticate, clear, fetch};
 use crate::db::{
-    create_challenge, insert_passkey, redeem_challenge, select_passkeys, update_sign_count,
+    create_challenge, insert_passkey, redeem_challenge, select_passkeys, select_user,
+    update_sign_count,
 };
 use crate::env::HOST_NAME;
 use crate::webauthn::{
@@ -8,12 +9,10 @@ use crate::webauthn::{
 };
 use axum::{Json, extract::Query, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use email_address::{EmailAddress, Options};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use uuid::Uuid;
 use webauthn_rs_core::proto::COSEAlgorithm;
 
 const PUBLIC_KEY_TYPE: &str = "public-key";
@@ -121,6 +120,20 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
         Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorJson { error: e })).into_response(),
     };
 
+    let user = match select_user(email.clone()).await {
+        Ok(user) => user,
+        Err(err) => {
+            println!("Failed to select user from email: {err}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorJson {
+                    error: String::from(UNEXPECTED_ERROR),
+                }),
+            )
+                .into_response();
+        }
+    };
+
     let challenge = match create_challenge(email.clone()).await {
         Ok(c) => c,
         Err(err) => {
@@ -135,18 +148,21 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
         }
     };
 
-    let passkeys: Vec<String> = match select_passkeys(email).await {
-        Ok(response) => response.into_iter().map(|p| p.id).collect(),
-        Err(err) => {
-            println!("Failed to select passkeys from email: {err}");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorJson {
-                    error: String::from(UNEXPECTED_ERROR),
-                }),
-            )
-                .into_response();
-        }
+    let passkeys: Vec<String> = match user.clone() {
+        Some(user) => match select_passkeys(&user).await {
+            Ok(response) => response.into_iter().map(|p| p.id).collect(),
+            Err(err) => {
+                println!("Failed to select passkeys from email: {err}");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorJson {
+                        error: String::from(UNEXPECTED_ERROR),
+                    }),
+                )
+                    .into_response();
+            }
+        },
+        None => vec![],
     };
 
     let supported_public_keys: Vec<PublicKeyParam> = COSEAlgorithm::secure_algs()
@@ -157,8 +173,13 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
         })
         .collect();
 
+    let user_id = match user {
+        Some(user) => user.id,
+        None => challenge.id.to_string(),
+    };
+
     Json(LoginMetadata {
-        user_id: URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes()),
+        user_id,
         challenge: challenge.id,
         origin: HOST_NAME.to_string(),
         supported_public_keys,
@@ -188,20 +209,30 @@ pub async fn signup(
         );
     }
 
-    let email = match fetch_email(query) {
+    let email = match fetch_email(query.clone()) {
         Ok(email) => email,
-        Err(e) => {
+        Err(error) => {
             return (
                 cookies,
-                (StatusCode::BAD_REQUEST, Json(ErrorJson { error: e })).into_response(),
+                (StatusCode::BAD_REQUEST, Json(ErrorJson { error })).into_response(),
             );
         }
     };
 
-    if match select_passkeys(email.clone()).await {
-        Ok(response) => response.len() > 0,
+    let display_name = match fetch_display_name(query) {
+        Ok(n) => n,
+        Err(error) => {
+            return (
+                cookies,
+                (StatusCode::BAD_REQUEST, Json(ErrorJson { error })).into_response(),
+            );
+        }
+    };
+
+    if match select_user(email.clone()).await {
+        Ok(response) => response.is_some(),
         Err(err) => {
-            println!("Failed to query for existing passkeys: {err}");
+            println!("Failed to query for existing user: {err}");
             return (
                 cookies,
                 (
@@ -248,7 +279,7 @@ pub async fn signup(
     };
 
     // Verifies that the challenge is valid.
-    match redeem_challenge(client_data.challenge.clone(), email.clone()).await {
+    let challenge = match redeem_challenge(client_data.challenge.clone(), email.clone()).await {
         Ok(c) => c,
         Err(err) => {
             println!("Failed to redeem challenge: {err}");
@@ -300,7 +331,14 @@ pub async fn signup(
         }
     };
 
-    match insert_passkey(attestation_object, email.to_string()).await {
+    match insert_passkey(
+        challenge,
+        attestation_object,
+        email.to_string(),
+        display_name,
+    )
+    .await
+    {
         Ok(_) => match authenticate(cookies.clone(), email) {
             Ok(c) => (c, StatusCode::CREATED.into_response()),
             Err(err) => {
@@ -345,6 +383,37 @@ pub async fn signin(
             return (
                 cookies,
                 (StatusCode::BAD_REQUEST, Json(ErrorJson { error: e })).into_response(),
+            );
+        }
+    };
+
+    let user = match select_user(email.to_string()).await {
+        Ok(user) => match user {
+            Some(u) => u,
+            None => {
+                return (
+                    cookies,
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(ErrorJson {
+                            error: String::from("Email is not registered"),
+                        }),
+                    )
+                        .into_response(),
+                );
+            }
+        },
+        Err(err) => {
+            println!("Error selecting user during sign in: {err}");
+            return (
+                cookies,
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorJson {
+                        error: UNEXPECTED_ERROR.to_string(),
+                    }),
+                )
+                    .into_response(),
             );
         }
     };
@@ -401,7 +470,7 @@ pub async fn signin(
         }
     };
 
-    let passkey = match select_passkeys(email.to_string()).await {
+    let passkey = match select_passkeys(&user).await {
         Ok(passkeys) => match passkeys.iter().find(|p| p.id == request.id) {
             Some(p) => p.clone(),
             None => {
@@ -534,6 +603,26 @@ fn fetch_email(query: HashMap<String, String>) -> Result<String, String> {
         Ok(email) => Ok(email.email()),
         Err(_) => Err(String::from("Invalid email")),
     }
+}
+
+/// Fetches the display name from the query string, and checks to ensure it is only alphanumeric characters.
+///
+/// Technically doesn't check the same requirements as the frontend. The underscores are unlimited, and can
+/// be at the beginning or the end. But we'll allow this "bug" because it's fun for people entering security.
+fn fetch_display_name(query: HashMap<String, String>) -> Result<String, String> {
+    let display_name = match query.get("displayName") {
+        Some(n) => n,
+        None => return Err(String::from("Invalid displayName")),
+    };
+
+    if display_name
+        .chars()
+        .any(|c| !c.is_ascii_alphanumeric() && c != '_')
+    {
+        return Err(String::from("Invalid displayName"));
+    }
+
+    Ok(display_name.to_string())
 }
 
 #[cfg(test)]

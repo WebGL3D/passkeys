@@ -6,6 +6,29 @@ use serde::{Deserialize, de::DeserializeOwned};
 use sha2::Digest;
 use uuid::Uuid;
 
+/// The user record from the database.
+#[derive(Deserialize, Clone)]
+pub struct User {
+    /// The ID of the user.
+    pub id: String,
+
+    /// A hash of the email address for the user associated with the passkey.
+    #[allow(dead_code)]
+    pub email_hash: String,
+
+    // The user's chosen display name.
+    #[allow(dead_code)]
+    pub display_name: String,
+
+    /// The milliseconds after epoch when the user was registered.
+    #[allow(dead_code)]
+    pub created: u64,
+
+    /// The milliseconds after epoch when the user was last updated.
+    #[allow(dead_code)]
+    pub updated: u64,
+}
+
 /// The passkey record from the database.
 #[derive(Deserialize, Clone)]
 pub struct Passkey {
@@ -21,7 +44,7 @@ pub struct Passkey {
 
     /// A hash of the email address for the user associated with the passkey.
     #[allow(dead_code)]
-    pub email_hash: String,
+    pub user_id: String,
 
     /// The format of the passkey at initial attestation
     pub format: String,
@@ -84,9 +107,20 @@ pub async fn db1_query<T: DeserializeOwned>(
     }
 }
 
-/// Selects all passkeys associated with an email address.
-pub async fn select_passkeys(email: String) -> Result<Vec<Passkey>, Error> {
-    db1_query::<Passkey>("PASSKEYS_SELECT", vec![hash_email(email)]).await
+/// Fetches the user record by their email address.
+pub async fn select_user(email: String) -> Result<Option<User>, Error> {
+    match db1_query::<User>("USERS_SELECT_EMAIL_HASH", vec![hash_email(email)]).await {
+        Ok(user) => match user.first() {
+            Some(user) => Ok(Some(user.clone())),
+            None => Ok(None),
+        },
+        Err(err) => Err(err),
+    }
+}
+
+/// Selects all passkeys that exist for a user.
+pub async fn select_passkeys(user: &User) -> Result<Vec<Passkey>, Error> {
+    db1_query::<Passkey>("PASSKEYS_SELECT_USER_ID", vec![user.id.to_string()]).await
 }
 
 /// Starts a challenge for the email address.
@@ -121,9 +155,55 @@ pub async fn redeem_challenge(id: String, email: String) -> Result<Challenge, St
 
 /// Inserts a passkey into the database.
 pub async fn insert_passkey(
+    challenge: Challenge,
     attestation_object: AttestationObject,
     email: String,
+    display_name: String,
 ) -> Result<Passkey, String> {
+    if !hash_email(email.to_string()).eq(&challenge.email_hash) {
+        return Err(String::from("Email did not match challenge email"));
+    }
+
+    let user = match select_user(email).await {
+        Ok(user) => {
+            match user {
+                Some(user) => user,
+                None => {
+                    // The user does not exist yet, and we have a passkey for them.
+                    // Insert the passkey.
+                    match db1_query::<User>(
+                        "USERS_INSERT",
+                        vec![
+                            // The challenge ID becomes the user ID.
+                            challenge.id,
+                            display_name,
+                            challenge.email_hash,
+                        ],
+                    )
+                    .await
+                    {
+                        Ok(users) => match users.first() {
+                            Some(u) => u.clone(),
+                            None => {
+                                return Err(String::from(
+                                    "No user was returned from insert query.",
+                                ));
+                            }
+                        },
+                        Err(err) => {
+                            return Err(format!(
+                                "Failed to insert user during passkey creation: {err}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        Err(err) => {
+            return Err(format!("Failed to select user for passkey insert: {err}"));
+        }
+    };
+
     let credential_id = match attestation_object.authenticator_data.credential_id {
         Some(c) => c,
         None => return Err(String::from("Invalid credential ID")),
@@ -154,7 +234,7 @@ pub async fn insert_passkey(
         "PASSKEYS_INSERT",
         vec![
             credential_id,
-            hash_email(email),
+            user.id,
             credential_public_key,
             credential_algorithm.to_string(),
             attestation_object.format,
@@ -199,7 +279,7 @@ pub async fn update_email(
     new_email: String,
 ) -> Result<Vec<Passkey>, String> {
     match db1_query::<Passkey>(
-        "PASSKEYS_UPDATE_EMAIL_HASH",
+        "USERS_UPDATE_EMAIL_HASH",
         vec![hash_email(original_email), hash_email(new_email)],
     )
     .await
@@ -210,9 +290,12 @@ pub async fn update_email(
 }
 
 /// Deletes all data about a user, by their email address.
-pub async fn delete_user(email: String) -> Result<Vec<Passkey>, String> {
-    match db1_query::<Passkey>("USERS_DELETE", vec![hash_email(email)]).await {
-        Ok(passkeys) => Ok(passkeys),
+pub async fn delete_user(email: String) -> Result<Option<User>, String> {
+    match db1_query::<User>("USERS_DELETE", vec![hash_email(email)]).await {
+        Ok(users) => match users.first() {
+            Some(u) => Ok(Some(u.clone())),
+            None => Ok(None),
+        },
         Err(err) => Err(format!("Failed to delete user from database: {err}")),
     }
 }

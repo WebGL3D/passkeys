@@ -57,12 +57,14 @@ export async function initiateLogin(
 
 export async function signup(
   email: string,
+  displayName: string,
   publicKey: PublicKeyCredential,
 ): Promise<void> {
   console.log('Signup', publicKey);
   const response = await fetch(
     `/api/v1/passkeys/signup?${new URLSearchParams({
       email,
+      displayName,
     })}`,
     {
       credentials: 'include',

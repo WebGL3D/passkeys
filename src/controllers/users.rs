@@ -1,4 +1,4 @@
-use crate::cookies::{AuthCookie, authenticate, clear, fetch};
+use crate::cookies::{authenticate, clear, fetch, get_cookie};
 use crate::db::{delete_user, select_passkeys, update_email as db1_update_email};
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
@@ -11,6 +11,9 @@ struct User {
     /// The email address of the user.
     #[serde(rename = "emailAddress")]
     email_address: String,
+
+    /// The chosen display name for the user.
+    display_name: String,
 
     /// The user's avatar icon/image URL.
     avatar: String,
@@ -56,13 +59,14 @@ pub struct Passkey {
 
 /// Fetches the currently authenticated user.
 pub async fn authenticated_user(cookies: CookieJar) -> (CookieJar, impl IntoResponse) {
-    match get_user(cookies.clone()).await {
-        Ok(user) => {
-            let gravatar_hash = md5::compute(user.sub.to_lowercase());
+    match get_cookie(cookies.clone()).await {
+        Ok((cookie, user)) => {
+            let gravatar_hash = md5::compute(cookie.sub.to_lowercase());
             (
                 cookies,
                 Json(User {
-                    email_address: user.sub,
+                    email_address: cookie.sub,
+                    display_name: user.display_name,
                     avatar: format!(
                         "https://www.gravatar.com/avatar/{:x}?size=150",
                         gravatar_hash
@@ -125,8 +129,16 @@ pub async fn delete_account(cookies: CookieJar) -> (CookieJar, impl IntoResponse
     };
 
     match delete_user(email).await {
-        Ok(passkeys) => {
-            println!("Deleted user with {} passkeys", passkeys.len());
+        Ok(user) => {
+            match user {
+                Some(user) => {
+                    println!("Deleted user: {}", user.id);
+                }
+                None => {
+                    println!("No user to delete");
+                }
+            }
+
             (clear(cookies), StatusCode::NO_CONTENT.into_response())
         }
         Err(err) => {
@@ -138,12 +150,12 @@ pub async fn delete_account(cookies: CookieJar) -> (CookieJar, impl IntoResponse
 
 /// Fetches all passkeys associated with the authenticated user.
 pub async fn fetch_passkeys(cookies: CookieJar) -> impl IntoResponse {
-    let cookie = match get_user(cookies).await {
-        Ok(user) => user,
+    let user = match get_cookie(cookies).await {
+        Ok((_, user)) => user,
         Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let passkeys: Vec<Passkey> = match select_passkeys(cookie.sub).await {
+    let passkeys: Vec<Passkey> = match select_passkeys(&user).await {
         Ok(passkeys) => passkeys
             .iter()
             .map(|p| Passkey {
@@ -184,26 +196,4 @@ pub async fn fetch_passkeys(cookies: CookieJar) -> impl IntoResponse {
     };
 
     Json(passkeys).into_response()
-}
-
-async fn get_user(cookies: CookieJar) -> Result<AuthCookie, String> {
-    match fetch(cookies) {
-        Ok(user) => {
-            let has_passkey = match select_passkeys(user.sub.to_string()).await {
-                Ok(passkeys) => !passkeys.is_empty(),
-                Err(err) => {
-                    return Err(format!("Failed to select passkeys for user: {err}"));
-                }
-            };
-
-            if !has_passkey {
-                return Err(String::from(
-                    "No passkeys for user - email has likely been changed, or account deleted.",
-                ));
-            }
-
-            Ok(user)
-        }
-        Err(err) => Err(format!("Failed to fetch authentication cookie: {err}")),
-    }
 }

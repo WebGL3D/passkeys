@@ -194,7 +194,7 @@ export default function Login() {
       })) as PublicKeyCredential;
 
       if (credentials) {
-        await signup(email, credentials);
+        await signup(email, displayName, credentials);
       } else {
         console.warn('navigator.credentials.create returned null?');
         clearChallenge();
