@@ -23,7 +23,7 @@ bitflags! {
         const BACKUP_ELIGIBLE = 1 << 3;
 
         /// If set, the public key credential source is currently backed up (see `BACKUP_ELIGIBLE` for context).
-        const BACKUP_STATE = 1 << 4;
+        const ACTIVELY_BACKED_UP = 1 << 4;
 
         /// If set, the attested credential data will immediately follow the first 37 bytes of the `authenticatorData`.
         const ATTESTED_CREDENTIAL_DATA_PRESENT = 1 << 6;

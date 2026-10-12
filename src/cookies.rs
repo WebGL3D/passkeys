@@ -1,3 +1,4 @@
+use crate::db::{Passkey, select_passkeys, select_user};
 use crate::env::{HOST_NAME, ISSUER, JWT_PRIVATE_KEY, JWT_PUBLIC_KEY};
 use axum_extra::extract::{CookieJar, cookie::Cookie};
 use chrono::Utc;
@@ -79,6 +80,42 @@ pub fn clear(cookies: CookieJar) -> CookieJar {
         .max_age(time::Duration::ZERO)
         .build();
     cookies.remove(cookie)
+}
+
+pub async fn get_cookie(
+    cookies: CookieJar,
+) -> Result<(AuthCookie, crate::db::User, Vec<Passkey>), String> {
+    match fetch(cookies) {
+        Ok(cookie) => {
+            let user = match select_user(cookie.sub.to_string()).await {
+                Ok(user) => match user {
+                    Some(u) => u,
+                    None => {
+                        return Err(String::from(
+                            "No user registered with email - email has likely been changed, or account deleted.",
+                        ));
+                    }
+                },
+                Err(err) => return Err(format!("Failed to fetch user from cookie: {err}")),
+            };
+
+            let passkeys = match select_passkeys(&user).await {
+                Ok(passkeys) => passkeys,
+                Err(err) => {
+                    return Err(format!("Failed to select passkeys for user: {err}"));
+                }
+            };
+
+            if passkeys.is_empty() {
+                return Err(String::from(
+                    "No passkeys for user - email has likely been changed, or account deleted.",
+                ));
+            }
+
+            Ok((cookie, user, passkeys))
+        }
+        Err(err) => Err(format!("Failed to fetch authentication cookie: {err}")),
+    }
 }
 
 #[cfg(test)]

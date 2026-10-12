@@ -36,7 +36,7 @@ mocks:
             }
           ]
 
-  - id: fetch-passkeys
+  - id: fetch-users
     workspace: default
     type: http
     http:
@@ -44,7 +44,7 @@ mocks:
         method: GET
         path: /query
         queryParams:
-          name: PASSKEYS_SELECT
+          name: USERS_SELECT_EMAIL_HASH
       response:
         statusCode: 200
         headers:

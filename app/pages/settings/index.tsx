@@ -20,7 +20,7 @@ export default function Settings() {
   }
 
   return (
-    <Box sx={{ maxWidth: '500px', margin: 'auto' }}>
+    <Box sx={{ maxWidth: '500px', margin: 'auto', p: 1 }}>
       <AccountSettings />
       <Passkeys />
     </Box>

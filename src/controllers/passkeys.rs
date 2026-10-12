@@ -1,19 +1,19 @@
-use crate::cookies::{authenticate, clear, fetch};
+use crate::cookies::{authenticate, clear, fetch, get_cookie};
 use crate::db::{
-    create_challenge, insert_passkey, redeem_challenge, select_passkeys, update_sign_count,
+    create_challenge, delete_passkey as passkey_delete, insert_passkey, redeem_challenge,
+    select_passkeys, select_user, update_sign_count,
 };
 use crate::env::HOST_NAME;
 use crate::webauthn::{
     parse_attestation_object, parse_authenticator_data, parse_client_data, verify_signature,
 };
+use axum::extract::Path;
 use axum::{Json, extract::Query, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use chrono::Utc;
 use email_address::{EmailAddress, Options};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use uuid::Uuid;
+use time::OffsetDateTime;
 use webauthn_rs_core::proto::COSEAlgorithm;
 
 const PUBLIC_KEY_TYPE: &str = "public-key";
@@ -53,8 +53,35 @@ pub struct LoginMetadata {
     #[serde(rename = "availablePublicKeys")]
     pub available_public_keys: Vec<String>,
 
-    /// The timeout (in milliseconds) before the challenge is no longer valid.
-    pub timeout: u64,
+    /// The expiration for when the challenge will no longer be valid.
+    #[serde(with = "time::serde::iso8601")]
+    pub expiration: OffsetDateTime,
+}
+
+#[derive(Serialize)]
+/// Data that can be used to add a new passkey to an existing "account".
+pub struct AddPasskeyMetadata {
+    /// The user that is attempting to log in.
+    #[serde(rename = "userId")]
+    pub user_id: String,
+
+    /// The registered display name for the user.
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+
+    /// The authentication challenge ID.
+    pub challenge: String,
+
+    /// The origin to use as the `rpId`.
+    pub origin: String,
+
+    /// Maps to [pubKeyCredParams](https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#pubkeycredparams)
+    #[serde(rename = "pubKeyCredParams")]
+    pub supported_public_keys: Vec<PublicKeyParam>,
+
+    /// The expiration for when the challenge will no longer be valid.
+    #[serde(with = "time::serde::iso8601")]
+    pub expiration: OffsetDateTime,
 }
 
 #[derive(Deserialize)]
@@ -75,6 +102,8 @@ pub struct CredentialCreateResponse {
     #[serde(rename = "publicKeyAlgorithm")]
     #[allow(dead_code)]
     public_key_algorithm: i32,
+
+    transports: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -87,11 +116,6 @@ pub struct CredentialFetchResponse {
 
     /// The verification signature.
     signature: String,
-
-    /// The ID of the user that they were signed up with.
-    #[serde(rename = "userHandle")]
-    #[allow(dead_code)]
-    user_id: String,
 }
 
 #[derive(Deserialize)]
@@ -121,6 +145,20 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
         Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorJson { error: e })).into_response(),
     };
 
+    let user = match select_user(email.clone()).await {
+        Ok(user) => user,
+        Err(err) => {
+            println!("Failed to select user from email: {err}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorJson {
+                    error: String::from(UNEXPECTED_ERROR),
+                }),
+            )
+                .into_response();
+        }
+    };
+
     let challenge = match create_challenge(email.clone()).await {
         Ok(c) => c,
         Err(err) => {
@@ -135,10 +173,54 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
         }
     };
 
-    let passkeys: Vec<String> = match select_passkeys(email).await {
-        Ok(response) => response.into_iter().map(|p| p.id).collect(),
+    let passkeys: Vec<String> = match user.clone() {
+        Some(user) => match select_passkeys(&user).await {
+            Ok(response) => response.into_iter().map(|p| p.id).collect(),
+            Err(err) => {
+                println!("Failed to select passkeys from email: {err}");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorJson {
+                        error: String::from(UNEXPECTED_ERROR),
+                    }),
+                )
+                    .into_response();
+            }
+        },
+        None => vec![],
+    };
+
+    let user_id = match user {
+        Some(user) => user.id,
+        None => challenge.id.to_string(),
+    };
+
+    Json(LoginMetadata {
+        user_id,
+        challenge: challenge.id,
+        origin: HOST_NAME.to_string(),
+        supported_public_keys: fetch_supported_algorithms(),
+        expiration: OffsetDateTime::from_unix_timestamp((challenge.expiration / 1000) as i64)
+            .unwrap_or_else(|err| {
+                println!("Failed to parse challenge expiration: {err}");
+                OffsetDateTime::UNIX_EPOCH
+            }),
+        available_public_keys: passkeys,
+    })
+    .into_response()
+}
+
+/// Initiates adding a new passkey to the authenticated user.
+pub async fn initiate_challenge(cookies: CookieJar) -> impl IntoResponse {
+    let (cookie, user) = match get_cookie(cookies).await {
+        Ok((cookie, user, _)) => (cookie, user),
+        Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    let challenge = match create_challenge(cookie.sub).await {
+        Ok(c) => c,
         Err(err) => {
-            println!("Failed to select passkeys from email: {err}");
+            println!("Failed to create challenge: {err}");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorJson {
@@ -149,22 +231,17 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
         }
     };
 
-    let supported_public_keys: Vec<PublicKeyParam> = COSEAlgorithm::secure_algs()
-        .iter()
-        .map(|a| PublicKeyParam {
-            alg: *a as i32,
-            key_type: String::from(PUBLIC_KEY_TYPE),
-        })
-        .collect();
-
-    Json(LoginMetadata {
-        user_id: URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes()),
+    Json(AddPasskeyMetadata {
+        user_id: user.id,
+        display_name: user.display_name,
         challenge: challenge.id,
         origin: HOST_NAME.to_string(),
-        supported_public_keys,
-        // 1 second accounting for latency
-        timeout: challenge.expiration - ((Utc::now().timestamp() * 1000) as u64) - 1000,
-        available_public_keys: passkeys,
+        supported_public_keys: fetch_supported_algorithms(),
+        expiration: OffsetDateTime::from_unix_timestamp((challenge.expiration / 1000) as i64)
+            .unwrap_or_else(|err| {
+                println!("Failed to parse challenge expiration: {err}");
+                OffsetDateTime::UNIX_EPOCH
+            }),
     })
     .into_response()
 }
@@ -188,20 +265,30 @@ pub async fn signup(
         );
     }
 
-    let email = match fetch_email(query) {
+    let email = match fetch_email(query.clone()) {
         Ok(email) => email,
-        Err(e) => {
+        Err(error) => {
             return (
                 cookies,
-                (StatusCode::BAD_REQUEST, Json(ErrorJson { error: e })).into_response(),
+                (StatusCode::BAD_REQUEST, Json(ErrorJson { error })).into_response(),
             );
         }
     };
 
-    if match select_passkeys(email.clone()).await {
-        Ok(response) => response.len() > 0,
+    let display_name = match fetch_display_name(query) {
+        Ok(n) => n,
+        Err(error) => {
+            return (
+                cookies,
+                (StatusCode::BAD_REQUEST, Json(ErrorJson { error })).into_response(),
+            );
+        }
+    };
+
+    if match select_user(email.clone()).await {
+        Ok(response) => response.is_some(),
         Err(err) => {
-            println!("Failed to query for existing passkeys: {err}");
+            println!("Failed to query for existing user: {err}");
             return (
                 cookies,
                 (
@@ -248,7 +335,7 @@ pub async fn signup(
     };
 
     // Verifies that the challenge is valid.
-    match redeem_challenge(client_data.challenge.clone(), email.clone()).await {
+    let challenge = match redeem_challenge(client_data.challenge.clone(), email.clone()).await {
         Ok(c) => c,
         Err(err) => {
             println!("Failed to redeem challenge: {err}");
@@ -300,7 +387,15 @@ pub async fn signup(
         }
     };
 
-    match insert_passkey(attestation_object, email.to_string()).await {
+    match insert_passkey(
+        challenge,
+        attestation_object,
+        request.response.transports,
+        email.to_string(),
+        display_name,
+    )
+    .await
+    {
         Ok(_) => match authenticate(cookies.clone(), email) {
             Ok(c) => (c, StatusCode::CREATED.into_response()),
             Err(err) => {
@@ -345,6 +440,37 @@ pub async fn signin(
             return (
                 cookies,
                 (StatusCode::BAD_REQUEST, Json(ErrorJson { error: e })).into_response(),
+            );
+        }
+    };
+
+    let user = match select_user(email.to_string()).await {
+        Ok(user) => match user {
+            Some(u) => u,
+            None => {
+                return (
+                    cookies,
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(ErrorJson {
+                            error: String::from("Email is not registered"),
+                        }),
+                    )
+                        .into_response(),
+                );
+            }
+        },
+        Err(err) => {
+            println!("Error selecting user during sign in: {err}");
+            return (
+                cookies,
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorJson {
+                        error: UNEXPECTED_ERROR.to_string(),
+                    }),
+                )
+                    .into_response(),
             );
         }
     };
@@ -401,7 +527,7 @@ pub async fn signin(
         }
     };
 
-    let passkey = match select_passkeys(email.to_string()).await {
+    let passkey = match select_passkeys(&user).await {
         Ok(passkeys) => match passkeys.iter().find(|p| p.id == request.id) {
             Some(p) => p.clone(),
             None => {
@@ -517,6 +643,125 @@ pub async fn signout(cookies: CookieJar) -> (CookieJar, impl IntoResponse) {
     (clear(cookies), StatusCode::NO_CONTENT.into_response())
 }
 
+/// Adds a new passkey to an existing account.
+pub async fn add_passkey(
+    cookies: CookieJar,
+    Json(request): Json<SignupRequest>,
+) -> impl IntoResponse {
+    let (cookie, user) = match get_cookie(cookies).await {
+        Ok((cookie, user, _)) => (cookie, user),
+        Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    // Verifies the rpIdHash
+    match parse_authenticator_data(request.response.authenticator_data) {
+        Ok(a) => a,
+        Err(err) => {
+            println!("Failed to parse authenticatorData: {err}");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorJson {
+                    error: String::from("Invalid authenticatorData"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let attestation_object = match parse_attestation_object(request.response.attestation_object) {
+        Ok(a) => a,
+        Err(err) => {
+            println!("Failed to parse attestationObject: {err}");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorJson {
+                    error: String::from("Invalid attestationObject"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let client_data = match parse_client_data(request.response.client_data_json, "webauthn.create")
+    {
+        Ok(c) => c,
+        Err(err) => {
+            println!("Failed to parse clientDataJSON: {err}");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorJson {
+                    error: String::from("Invalid clientDataJSON"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // Verifies the challenge.
+    let challenge =
+        match redeem_challenge(client_data.challenge.clone(), cookie.sub.to_string()).await {
+            Ok(c) => c,
+            Err(err) => {
+                println!("Failed to redeem challenge: {err}");
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorJson {
+                        error: String::from("Invalid challenge token"),
+                    }),
+                )
+                    .into_response();
+            }
+        };
+
+    match insert_passkey(
+        challenge,
+        attestation_object,
+        request.response.transports,
+        cookie.sub,
+        user.display_name,
+    )
+    .await
+    {
+        Ok(_) => StatusCode::CREATED.into_response(),
+        Err(err) => {
+            println!("Failed to insert passkey: {err}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorJson {
+                    error: UNEXPECTED_ERROR.to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Deletes a passkey from the authenticated user.
+pub async fn delete_passkey(cookies: CookieJar, Path(id): Path<String>) -> impl IntoResponse {
+    let passkeys: Vec<String> = match get_cookie(cookies).await {
+        Ok((_, _, passkeys)) => passkeys.iter().map(|p| p.id.to_string()).collect(),
+        Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    if !passkeys.contains(&id) {
+        // Passkey does not belong to authenticated user.
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    if passkeys.len() < 2 {
+        // Would leave account without a passkey.
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    match passkey_delete(id).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => {
+            println!("Failed to delete passkey: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
 /// Fetches and validates the email address from the query string.
 fn fetch_email(query: HashMap<String, String>) -> Result<String, String> {
     let email = match query.get("email") {
@@ -534,6 +779,36 @@ fn fetch_email(query: HashMap<String, String>) -> Result<String, String> {
         Ok(email) => Ok(email.email()),
         Err(_) => Err(String::from("Invalid email")),
     }
+}
+
+/// Fetches the display name from the query string, and checks to ensure it is only alphanumeric characters.
+///
+/// Technically doesn't check the same requirements as the frontend. The underscores are unlimited, and can
+/// be at the beginning or the end. But we'll allow this "bug" because it's fun for people entering security.
+fn fetch_display_name(query: HashMap<String, String>) -> Result<String, String> {
+    let display_name = match query.get("displayName") {
+        Some(n) => n,
+        None => return Err(String::from("Invalid displayName")),
+    };
+
+    if display_name
+        .chars()
+        .any(|c| !c.is_ascii_alphanumeric() && c != '_')
+    {
+        return Err(String::from("Invalid displayName"));
+    }
+
+    Ok(display_name.to_string())
+}
+
+fn fetch_supported_algorithms() -> Vec<PublicKeyParam> {
+    COSEAlgorithm::secure_algs()
+        .iter()
+        .map(|a| PublicKeyParam {
+            alg: *a as i32,
+            key_type: String::from(PUBLIC_KEY_TYPE),
+        })
+        .collect()
 }
 
 #[cfg(test)]

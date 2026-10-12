@@ -11,6 +11,8 @@ type SerializedPasskey = {
   format: string;
   aaguid: string;
   signCount: number;
+  flags: string[];
+  transports: string[];
   lastUsed: string;
   created: string;
   updated: string;
@@ -21,6 +23,8 @@ export type Passkey = {
   format: string;
   aaguid: string;
   signCount: number;
+  flags: string[];
+  transports: string[];
   lastUsed: Date;
   created: Date;
   updated: Date;
@@ -114,12 +118,24 @@ export async function getPasskeys(): Promise<Passkey[]> {
 
   const result: SerializedPasskey[] = await response.json();
   return result.map(
-    ({ id, aaguid, format, signCount, lastUsed, created, updated }) => {
+    ({
+      id,
+      aaguid,
+      format,
+      signCount,
+      flags,
+      transports,
+      lastUsed,
+      created,
+      updated,
+    }) => {
       return {
         id,
         aaguid,
         format,
         signCount,
+        flags,
+        transports,
         lastUsed: new Date(lastUsed),
         created: new Date(created),
         updated: new Date(updated),
