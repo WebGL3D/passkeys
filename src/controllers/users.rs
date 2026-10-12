@@ -1,5 +1,6 @@
 use crate::cookies::{authenticate, clear, fetch, get_cookie};
 use crate::db::{delete_user, update_email as db1_update_email};
+use crate::webauthn::AuthenticatorFlags;
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
 use email_address::{EmailAddress, Options};
@@ -43,6 +44,12 @@ pub struct Passkey {
 
     /// The format of the passkey at initial attestation.
     pub format: String,
+
+    /// The flags the passkey was created with.
+    pub flags: Vec<String>,
+
+    /// The transports the passkey was created with.
+    pub transports: Vec<String>,
 
     /// The timestamp the passkey was last used for authentication.
     #[serde(with = "time::serde::iso8601", rename = "lastUsed")]
@@ -162,6 +169,11 @@ pub async fn fetch_passkeys(cookies: CookieJar) -> impl IntoResponse {
                 id: p.id.to_string(),
                 aaguid: p.aaguid.to_string(),
                 format: p.format.to_string(),
+                flags: match AuthenticatorFlags::from_bits(p.flags) {
+                    Some(flags) => flags.iter_names().map(|(n, _)| n.to_string()).collect(),
+                    None => vec![],
+                },
+                transports: p.transports.split(",").map(|t| t.to_string()).collect(),
                 sign_count: p.sign_count,
                 last_used: OffsetDateTime::from_unix_timestamp((p.last_used / 1000) as i64)
                     .unwrap_or_else(|err| {

@@ -1,12 +1,4 @@
-import { Delete } from '@mui/icons-material';
-import {
-  Alert,
-  Box,
-  Button,
-  IconButton,
-  Paper,
-  Typography,
-} from '@mui/material';
+import { Alert, Box, Button, Paper, Typography } from '@mui/material';
 import { Fragment, useEffect, useState } from 'react';
 import useAuthenticatedUser from '../../hooks/useAuthenticatedUser';
 import {
@@ -121,7 +113,10 @@ export default function Passkeys() {
               }}
             >
               <Typography variant="subtitle1" sx={{ fontSize: '8pt' }}>
-                Credential ID: {passkey.id}
+                Credential ID:{' '}
+                {Uint8Array.fromBase64(
+                  passkey.id.replace(/-/g, '+').replace(/_/g, '/'),
+                ).toHex()}
               </Typography>
               <Typography variant="subtitle1" sx={{ fontSize: '8pt' }}>
                 Authenticator Attestation GUID: {passkey.aaguid}
@@ -134,13 +129,6 @@ export default function Passkeys() {
                 {getTimeLabel(passkey.lastUsed)})
               </Typography>
             </Box>
-            {passkeys.length > 1 && (
-              <Box>
-                <IconButton sx={{ float: 'right' }} color="error" size="small">
-                  <Delete />
-                </IconButton>
-              </Box>
-            )}
           </Paper>
         );
       })}

@@ -55,6 +55,12 @@ pub struct Passkey {
     /// How many times the private key has signed a challenge.
     pub sign_count: u32,
 
+    /// The flags the passkey had at signup.
+    pub flags: u8,
+
+    /// A CSV of the transports the passkey had at signup.
+    pub transports: String,
+
     /// The milliseconds after epoch when the passkey was last updated.
     pub updated: u64,
 
@@ -157,6 +163,7 @@ pub async fn redeem_challenge(id: String, email: String) -> Result<Challenge, St
 pub async fn insert_passkey(
     challenge: Challenge,
     attestation_object: AttestationObject,
+    transports: Vec<String>,
     email: String,
     display_name: String,
 ) -> Result<Passkey, String> {
@@ -239,6 +246,12 @@ pub async fn insert_passkey(
             credential_algorithm.to_string(),
             attestation_object.format,
             aaguid,
+            attestation_object
+                .authenticator_data
+                .flags
+                .bits()
+                .to_string(),
+            transports.join(","),
         ],
     )
     .await

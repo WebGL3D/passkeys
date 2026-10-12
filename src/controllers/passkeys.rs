@@ -101,6 +101,8 @@ pub struct CredentialCreateResponse {
     #[serde(rename = "publicKeyAlgorithm")]
     #[allow(dead_code)]
     public_key_algorithm: i32,
+
+    transports: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -387,6 +389,7 @@ pub async fn signup(
     match insert_passkey(
         challenge,
         attestation_object,
+        request.response.transports,
         email.to_string(),
         display_name,
     )
@@ -709,7 +712,15 @@ pub async fn add_passkey(
             }
         };
 
-    match insert_passkey(challenge, attestation_object, cookie.sub, user.display_name).await {
+    match insert_passkey(
+        challenge,
+        attestation_object,
+        request.response.transports,
+        cookie.sub,
+        user.display_name,
+    )
+    .await
+    {
         Ok(_) => StatusCode::CREATED.into_response(),
         Err(err) => {
             println!("Failed to insert passkey: {err}");

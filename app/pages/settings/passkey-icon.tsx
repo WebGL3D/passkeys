@@ -1,6 +1,8 @@
 import {
   Android,
   Apple,
+  Cloud,
+  Devices,
   Key,
   Microsoft,
   SettingsRemote,
@@ -24,7 +26,19 @@ export default function PasskeyIcon({ passkey }: PasskeyIconInput) {
     case 'tpm':
       return <Microsoft />;
     default:
-      // Options for the future: Fingerprint, Devices / Cloud (Backup enabled?), Bluetooth?
+      if (passkey.transports.includes('usb')) {
+        return <SettingsRemote />;
+      }
+
+      if (passkey.flags.includes('ACTIVELY_BACKED_UP')) {
+        return <Cloud />;
+      }
+
+      if (passkey.flags.includes('BACKUP_ELIGIBLE')) {
+        return <Devices />;
+      }
+
+      // Options for the future: Fingerprint, Bluetooth?
       return <Key />;
   }
 }

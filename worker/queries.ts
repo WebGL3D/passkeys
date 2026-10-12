@@ -24,6 +24,12 @@ const PASSKEYS_CREATE_TABLE = `CREATE TABLE IF NOT EXISTS passkeys(
   /* How many times the private key has signed a challenge */
   sign_count INTEGER DEFAULT(0),
 
+  /* The flags the passkey had at signup */
+  flags INTEGER,
+
+  /* A CSV of the transports array the passkey had at signup */
+  transports STRING,
+
   /* A timestamp for when the passkey was created */
   created    INTEGER DEFAULT(unixepoch('subsec') * 1000),
 
@@ -36,7 +42,7 @@ const PASSKEYS_CREATE_TABLE = `CREATE TABLE IF NOT EXISTS passkeys(
 `;
 
 const PASSKEYS_SELECT_USER_ID = `SELECT * FROM passkeys WHERE [user_id] = ?`;
-const PASSKEYS_INSERT = `INSERT INTO passkeys ([id], [user_id], [public_key], [public_key_algorithm], [format], [aaguid]) VALUES (?, ?, ?, ?, ?, ?) RETURNING *`;
+const PASSKEYS_INSERT = `INSERT INTO passkeys ([id], [user_id], [public_key], [public_key_algorithm], [format], [aaguid], [flags], [transports]) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
 const PASSKEYS_UPDATE_SIGN_COUNT = `UPDATE passkeys SET
   [sign_count] = ?,
   [updated] = unixepoch('subsec') * 1000,
