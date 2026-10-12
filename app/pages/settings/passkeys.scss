@@ -1,6 +1,13 @@
 .passkey-row {
-  svg {
+  > svg {
     width: 48px;
     height: 48px;
+  }
+
+  h6 {
+    opacity: 0.65;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
   }
 }
