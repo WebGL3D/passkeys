@@ -1,9 +1,18 @@
-import { Alert, Box, Button, Paper, Typography } from '@mui/material';
+import { Delete } from '@mui/icons-material';
+import {
+  Alert,
+  Box,
+  Button,
+  IconButton,
+  Paper,
+  Typography,
+} from '@mui/material';
 import { Fragment, useEffect, useState } from 'react';
 import useAuthenticatedUser from '../../hooks/useAuthenticatedUser';
 import {
   addPasskey,
   createCredential,
+  deletePasskey,
   initiateAddPasskey,
 } from '../../services/passkeys';
 import { getPasskeys, type Passkey } from '../../services/users';
@@ -57,13 +66,29 @@ export default function Passkeys() {
       );
 
       await addPasskey(credential);
-      setRefreshCount(refreshCount + 1);
     } catch (err) {
       console.error('Failed to add alternative passkey', err);
       setErrorText(`Failed to add alternative passkey: ${err}`);
       setTimeout(() => {
         setErrorText('');
       }, 5000);
+    } finally {
+      setRefreshCount(refreshCount + 1);
+    }
+  };
+
+  const deletePasskeyClicked = async (id: string) => {
+    setDebounce(true);
+    try {
+      await deletePasskey(id);
+    } catch (err) {
+      console.error('Failed to delete passkey', err);
+      setErrorText(`Failed to delete passkey: ${err}`);
+      setTimeout(() => {
+        setErrorText('');
+      }, 5000);
+    } finally {
+      setRefreshCount(refreshCount + 1);
     }
   };
 
@@ -129,6 +154,17 @@ export default function Passkeys() {
                 {getTimeLabel(passkey.lastUsed)})
               </Typography>
             </Box>
+            {passkeys.length > 1 && (
+              <Box>
+                <IconButton
+                  onClick={async () => await deletePasskeyClicked(passkey.id)}
+                  color="error"
+                  size="small"
+                >
+                  <Delete />
+                </IconButton>
+              </Box>
+            )}
           </Paper>
         );
       })}

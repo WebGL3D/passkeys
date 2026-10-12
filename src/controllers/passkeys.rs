@@ -1,12 +1,13 @@
 use crate::cookies::{authenticate, clear, fetch, get_cookie};
 use crate::db::{
-    create_challenge, insert_passkey, redeem_challenge, select_passkeys, select_user,
-    update_sign_count,
+    create_challenge, delete_passkey as passkey_delete, insert_passkey, redeem_challenge,
+    select_passkeys, select_user, update_sign_count,
 };
 use crate::env::HOST_NAME;
 use crate::webauthn::{
     parse_attestation_object, parse_authenticator_data, parse_client_data, verify_signature,
 };
+use axum::extract::Path;
 use axum::{Json, extract::Query, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
 use email_address::{EmailAddress, Options};
@@ -731,6 +732,32 @@ pub async fn add_passkey(
                 }),
             )
                 .into_response()
+        }
+    }
+}
+
+/// Deletes a passkey from the authenticated user.
+pub async fn delete_passkey(cookies: CookieJar, Path(id): Path<String>) -> impl IntoResponse {
+    let passkeys: Vec<String> = match get_cookie(cookies).await {
+        Ok((_, _, passkeys)) => passkeys.iter().map(|p| p.id.to_string()).collect(),
+        Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    if !passkeys.contains(&id) {
+        // Passkey does not belong to authenticated user.
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    if passkeys.len() < 2 {
+        // Would leave account without a passkey.
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    match passkey_delete(id).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => {
+            println!("Failed to delete passkey: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
 }

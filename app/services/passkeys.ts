@@ -226,8 +226,19 @@ export async function addPasskey(
   if (!response.ok) {
     return Promise.reject(`Failed to register passkey: ${response.status}`);
   }
+}
 
-  clearCache();
+// Deletes a passkey from the account.
+export async function deletePasskey(id: string) {
+  console.log('Deleting passkey', id);
+  const response = await fetch(`/api/v1/passkeys/${id}`, {
+    credentials: 'include',
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    return Promise.reject(`Failed to delete passkey: ${response.status}`);
+  }
 }
 
 // Saves a passkey with the device/authenticator.

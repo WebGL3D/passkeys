@@ -264,6 +264,17 @@ pub async fn insert_passkey(
     }
 }
 
+/// Deletes an individual passkey from the database.
+pub async fn delete_passkey(id: String) -> Result<Passkey, String> {
+    match db1_query::<Passkey>("PASSKEYS_DELETE", vec![id]).await {
+        Ok(passkeys) => match passkeys.first() {
+            Some(passkey) => Ok(passkey.clone()),
+            None => Err(String::from("No passkey existed to delete.")),
+        },
+        Err(err) => Err(format!("Failed to delete passkeys from database: {err}")),
+    }
+}
+
 /// Updates the sign count for a passkey.
 pub async fn update_sign_count(passkey_id: String, sign_count: u32) -> Result<bool, String> {
     if sign_count == 0 {
