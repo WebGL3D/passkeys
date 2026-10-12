@@ -3,7 +3,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { isAlphanumeric, isEmail, isEmpty } from 'validator';
 import useAuthenticatedUser from '../hooks/useAuthenticatedUser';
-import { initiateLogin, signin, signup } from '../services/passkeys';
+import {
+  createCredential,
+  initiateLogin,
+  signin,
+  signup,
+} from '../services/passkeys';
 
 const enterKey = 'Enter';
 
@@ -39,7 +44,9 @@ export default function Login() {
   const [requestDisplayName, setRequestDisplayName] = useState(false);
   const [userId, setUserId] = useState<string>('');
   const [challenge, setChallenge] = useState<string>('');
-  const [authenticationTimeout, setAuthenticationTimeout] = useState(0);
+  const [authenticationTimeout, setAuthenticationTimeout] = useState<Date>(
+    new Date(0),
+  );
   const [pubKeyCredParams, setPubKeyCredParams] = useState<
     PublicKeyCredentialParameters[]
   >([]);
@@ -52,7 +59,7 @@ export default function Login() {
     setChallenge('');
     setUserId('');
     setRequestDisplayName(false);
-    setAuthenticationTimeout(0);
+    setAuthenticationTimeout(new Date(0));
     setPubKeyCredParams([]);
     setOrigin('');
   };
@@ -64,7 +71,8 @@ export default function Login() {
   }, [navigate, authenticatedUser]);
 
   useEffect(() => {
-    if (authenticationTimeout < 1 || !challenge) {
+    const timeoutMilliseconds = authenticationTimeout.getTime() - +new Date();
+    if (timeoutMilliseconds < 1 || !challenge) {
       return;
     }
 
@@ -78,7 +86,7 @@ export default function Login() {
         setDisplayName('');
         displayNameRef.current.value = '';
       }
-    }, authenticationTimeout);
+    }, timeoutMilliseconds);
 
     return () => clearTimeout(timeout);
   }, [challenge, authenticationTimeout]);
@@ -128,7 +136,7 @@ export default function Login() {
       const response = await initiateLogin(email);
       setChallenge(response.challenge);
       setPubKeyCredParams(response.pubKeyCredParams);
-      setAuthenticationTimeout(response.timeout);
+      setAuthenticationTimeout(response.expiration);
       setOrigin(response.origin);
       setUserId(response.userId);
 
@@ -144,6 +152,7 @@ export default function Login() {
               type: 'public-key',
             };
           }),
+          timeout: authenticationTimeout.getTime() - +new Date(),
         });
         const credentials = (await navigator.credentials.get({
           mediation: 'required',
@@ -169,29 +178,17 @@ export default function Login() {
       setChallenge('');
 
       // Create the passkey on the device.
-      const request = PublicKeyCredential.parseCreationOptionsFromJSON({
-        user: {
+      const credentials = await createCredential(
+        {
           id: userId,
           name: email,
           displayName,
         },
-        rp: {
-          id: origin,
-          name: 'Passkeys Demo',
-        },
-        authenticatorSelection: {
-          // This will require biometrics before saving the passkey.
-          userVerification: 'required',
-        },
         challenge,
+        authenticationTimeout,
+        origin,
         pubKeyCredParams,
-        attestation: 'none',
-        timeout: authenticationTimeout,
-      });
-
-      const credentials = (await navigator.credentials.create({
-        publicKey: request,
-      })) as PublicKeyCredential;
+      );
 
       if (credentials) {
         await signup(email, displayName, credentials);

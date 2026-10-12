@@ -1,4 +1,4 @@
-use crate::cookies::{authenticate, clear, fetch};
+use crate::cookies::{authenticate, clear, fetch, get_cookie};
 use crate::db::{
     create_challenge, insert_passkey, redeem_challenge, select_passkeys, select_user,
     update_sign_count,
@@ -9,10 +9,10 @@ use crate::webauthn::{
 };
 use axum::{Json, extract::Query, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
-use chrono::Utc;
 use email_address::{EmailAddress, Options};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use time::OffsetDateTime;
 use webauthn_rs_core::proto::COSEAlgorithm;
 
 const PUBLIC_KEY_TYPE: &str = "public-key";
@@ -52,8 +52,35 @@ pub struct LoginMetadata {
     #[serde(rename = "availablePublicKeys")]
     pub available_public_keys: Vec<String>,
 
-    /// The timeout (in milliseconds) before the challenge is no longer valid.
-    pub timeout: u64,
+    /// The expiration for when the challenge will no longer be valid.
+    #[serde(with = "time::serde::iso8601")]
+    pub expiration: OffsetDateTime,
+}
+
+#[derive(Serialize)]
+/// Data that can be used to add a new passkey to an existing "account".
+pub struct AddPasskeyMetadata {
+    /// The user that is attempting to log in.
+    #[serde(rename = "userId")]
+    pub user_id: String,
+
+    /// The registered display name for the user.
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+
+    /// The authentication challenge ID.
+    pub challenge: String,
+
+    /// The origin to use as the `rpId`.
+    pub origin: String,
+
+    /// Maps to [pubKeyCredParams](https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#pubkeycredparams)
+    #[serde(rename = "pubKeyCredParams")]
+    pub supported_public_keys: Vec<PublicKeyParam>,
+
+    /// The expiration for when the challenge will no longer be valid.
+    #[serde(with = "time::serde::iso8601")]
+    pub expiration: OffsetDateTime,
 }
 
 #[derive(Deserialize)]
@@ -86,11 +113,6 @@ pub struct CredentialFetchResponse {
 
     /// The verification signature.
     signature: String,
-
-    /// The ID of the user that they were signed up with.
-    #[serde(rename = "userHandle")]
-    #[allow(dead_code)]
-    user_id: String,
 }
 
 #[derive(Deserialize)]
@@ -165,14 +187,6 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
         None => vec![],
     };
 
-    let supported_public_keys: Vec<PublicKeyParam> = COSEAlgorithm::secure_algs()
-        .iter()
-        .map(|a| PublicKeyParam {
-            alg: *a as i32,
-            key_type: String::from(PUBLIC_KEY_TYPE),
-        })
-        .collect();
-
     let user_id = match user {
         Some(user) => user.id,
         None => challenge.id.to_string(),
@@ -182,10 +196,49 @@ pub async fn initiate_login(Query(query): Query<HashMap<String, String>>) -> imp
         user_id,
         challenge: challenge.id,
         origin: HOST_NAME.to_string(),
-        supported_public_keys,
-        // 1 second accounting for latency
-        timeout: challenge.expiration - ((Utc::now().timestamp() * 1000) as u64) - 1000,
+        supported_public_keys: fetch_supported_algorithms(),
+        expiration: OffsetDateTime::from_unix_timestamp((challenge.expiration / 1000) as i64)
+            .unwrap_or_else(|err| {
+                println!("Failed to parse challenge expiration: {err}");
+                OffsetDateTime::UNIX_EPOCH
+            }),
         available_public_keys: passkeys,
+    })
+    .into_response()
+}
+
+/// Initiates adding a new passkey to the authenticated user.
+pub async fn initiate_challenge(cookies: CookieJar) -> impl IntoResponse {
+    let (cookie, user) = match get_cookie(cookies).await {
+        Ok((cookie, user, _)) => (cookie, user),
+        Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    let challenge = match create_challenge(cookie.sub).await {
+        Ok(c) => c,
+        Err(err) => {
+            println!("Failed to create challenge: {err}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorJson {
+                    error: String::from(UNEXPECTED_ERROR),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    Json(AddPasskeyMetadata {
+        user_id: user.id,
+        display_name: user.display_name,
+        challenge: challenge.id,
+        origin: HOST_NAME.to_string(),
+        supported_public_keys: fetch_supported_algorithms(),
+        expiration: OffsetDateTime::from_unix_timestamp((challenge.expiration / 1000) as i64)
+            .unwrap_or_else(|err| {
+                println!("Failed to parse challenge expiration: {err}");
+                OffsetDateTime::UNIX_EPOCH
+            }),
     })
     .into_response()
 }
@@ -586,6 +639,91 @@ pub async fn signout(cookies: CookieJar) -> (CookieJar, impl IntoResponse) {
     (clear(cookies), StatusCode::NO_CONTENT.into_response())
 }
 
+/// Adds a new passkey to an existing account.
+pub async fn add_passkey(
+    cookies: CookieJar,
+    Json(request): Json<SignupRequest>,
+) -> impl IntoResponse {
+    let (cookie, user) = match get_cookie(cookies).await {
+        Ok((cookie, user, _)) => (cookie, user),
+        Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    // Verifies the rpIdHash
+    match parse_authenticator_data(request.response.authenticator_data) {
+        Ok(a) => a,
+        Err(err) => {
+            println!("Failed to parse authenticatorData: {err}");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorJson {
+                    error: String::from("Invalid authenticatorData"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let attestation_object = match parse_attestation_object(request.response.attestation_object) {
+        Ok(a) => a,
+        Err(err) => {
+            println!("Failed to parse attestationObject: {err}");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorJson {
+                    error: String::from("Invalid attestationObject"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let client_data = match parse_client_data(request.response.client_data_json, "webauthn.create")
+    {
+        Ok(c) => c,
+        Err(err) => {
+            println!("Failed to parse clientDataJSON: {err}");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorJson {
+                    error: String::from("Invalid clientDataJSON"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // Verifies the challenge.
+    let challenge =
+        match redeem_challenge(client_data.challenge.clone(), cookie.sub.to_string()).await {
+            Ok(c) => c,
+            Err(err) => {
+                println!("Failed to redeem challenge: {err}");
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorJson {
+                        error: String::from("Invalid challenge token"),
+                    }),
+                )
+                    .into_response();
+            }
+        };
+
+    match insert_passkey(challenge, attestation_object, cookie.sub, user.display_name).await {
+        Ok(_) => StatusCode::CREATED.into_response(),
+        Err(err) => {
+            println!("Failed to insert passkey: {err}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorJson {
+                    error: UNEXPECTED_ERROR.to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
 /// Fetches and validates the email address from the query string.
 fn fetch_email(query: HashMap<String, String>) -> Result<String, String> {
     let email = match query.get("email") {
@@ -623,6 +761,16 @@ fn fetch_display_name(query: HashMap<String, String>) -> Result<String, String> 
     }
 
     Ok(display_name.to_string())
+}
+
+fn fetch_supported_algorithms() -> Vec<PublicKeyParam> {
+    COSEAlgorithm::secure_algs()
+        .iter()
+        .map(|a| PublicKeyParam {
+            alg: *a as i32,
+            key_type: String::from(PUBLIC_KEY_TYPE),
+        })
+        .collect()
 }
 
 #[cfg(test)]
