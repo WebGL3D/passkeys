@@ -248,6 +248,10 @@ export async function createCredential(
     authenticatorSelection: {
       // This will require biometrics before saving the passkey.
       userVerification: 'required',
+      // TODO: Allow this to be specified by the user.
+      // Need to investigate more about "resident keys", but as I understand it a resident key is discoverable.
+      // And if it is discoverable, it will be visible in applications like Yubico Authenticator.
+      residentKey: 'required',
     },
     pubKeyCredParams,
     timeout: challengeExpiration.getTime() - +new Date(),
